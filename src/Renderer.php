@@ -23,12 +23,12 @@ final class Renderer
         string $out,
         RenderProfile $profile,
     ): void {
-        $n = QArtSpec::N;
+        $n = $spec->n;
         $s = ImagePipeline::S;
         $d = ImagePipeline::D;
         $scale = $profile->scale;
         $off = intdiv($s - $d, 2);
-        $hi = ImagePipeline::HI;
+        $hi = $img->hi;
         $border = $profile->borderModules * $s;
         $size = ($hi + 2 * $border) * $scale;
         $im = imagecreatetruecolor($size, $size);

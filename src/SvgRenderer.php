@@ -30,7 +30,7 @@ final class SvgRenderer
         array $matrix,
         RenderProfile $profile,
     ): string {
-        $n = QArtSpec::N;
+        $n = $spec->n;
         $s = ImagePipeline::S;
         $d = ImagePipeline::D;
         $off = intdiv($s - $d, 2);
@@ -47,7 +47,7 @@ final class SvgRenderer
 
         // 1. Texture dithérée : grille de couleurs puis fusion par plages
         $svg[] = '<g>';
-        $hi = ImagePipeline::HI;
+        $hi = $img->hi;
         for ($y = 0; $y < $hi; $y++) {
             $runColor = null;
             $runStart = 0;

@@ -38,7 +38,7 @@ final class SvgRendererTest extends TestCase
         self::$img = new ImagePipeline($im);
 
         // matrice arbitraire mais déterministe : damier sur les modules de données
-        $n = QArtSpec::N;
+        $n = self::$spec->n;
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {
                 self::$matrix[$r][$c] = self::$spec->fmap[$r][$c]

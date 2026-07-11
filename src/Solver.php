@@ -19,7 +19,9 @@ final class Solver
 {
     // Alphabet affine : offset 'O', coset = lettres H-W et h-w (URL-safe)
     public const OFFSET = 0x4F;
-    public const BASIS  = [0x21, 0x38, 0x1B, 0x3C, 0x3B];
+
+    public const BASIS = [0x21, 0x38, 0x1B, 0x3C, 0x3B];
+
     public const SERIAL = 8;
 
     public string $baseUrl;
@@ -45,10 +47,10 @@ final class Solver
         private readonly RandomSource $random,
     ) {
         $plen = strlen($prefix);
-        if ($plen < 1 || $plen + self::SERIAL >= QArtSpec::CAPACITY) {
+        if ($plen < 1 || $plen + self::SERIAL >= $spec->capacity) {
             throw new QArtException(sprintf(
-                'préfixe invalide : %d caractères, maximum %d (série de %d comprise)',
-                $plen, QArtSpec::CAPACITY - self::SERIAL - 1, self::SERIAL
+                'préfixe invalide : %d caractères, maximum %d pour la version %d (série de %d comprise)',
+                $plen, $spec->capacity - self::SERIAL - 1, $spec->version, self::SERIAL
             ));
         }
         if (preg_match('/[^\x21-\x7E]/', $prefix)) {
@@ -64,11 +66,11 @@ final class Solver
         $this->coset = $coset;
 
         $chars = str_split($prefix);
-        for ($i = count($chars); $i < QArtSpec::CAPACITY; $i++) {
+        for ($i = count($chars); $i < $spec->capacity; $i++) {
             $chars[] = chr(self::OFFSET);
         }
         $this->baseUrl = implode('', $chars);
-        $this->freeChars = range($plen + self::SERIAL, QArtSpec::CAPACITY - 1);
+        $this->freeChars = range($plen + self::SERIAL, $spec->capacity - 1);
         $this->reseedSerial();
     }
 
@@ -84,10 +86,13 @@ final class Solver
         }
     }
 
-    /** Clé de cache de la matrice : version/ECC figées, seule la longueur du préfixe compte. */
+    /** Clé de cache de la matrice : dépend de la version et de la longueur du préfixe. */
     public function cacheKey(): string
     {
-        return sprintf('qart-v10L-p%d-s%d-b%s', strlen($this->prefix), self::SERIAL, dechex(array_sum(self::BASIS)));
+        return sprintf(
+            'qart-v%dL-p%d-s%d-b%s',
+            $this->spec->version, strlen($this->prefix), self::SERIAL, dechex(array_sum(self::BASIS))
+        );
     }
 
     public function buildGenerator(?MatrixCache $cache = null): void
@@ -99,13 +104,13 @@ final class Solver
         if ($cols !== null && count($cols) === $nvars) {
             $this->cols = $cols;
         } else {
-            $m0 = Oracle::render($this->baseUrl, 0);
+            $m0 = Oracle::render($this->baseUrl, 0, $this->spec->version);
             $i = 0;
             foreach ($this->freeChars as $k) {
                 foreach (self::BASIS as $v) {
                     $u = $this->baseUrl;
                     $u[$k] = chr(ord($u[$k]) ^ $v);
-                    $this->cols[$i] = Oracle::render($u, 0) ^ $m0;
+                    $this->cols[$i] = Oracle::render($u, 0, $this->spec->version) ^ $m0;
                     $i++;
                 }
             }
@@ -122,7 +127,7 @@ final class Solver
     /**
      * Élimination gaussienne, pivots par ordre d'importance décroissante.
      *
-     * @param int[] $order positions de modules (r*N+c) triées par importance
+     * @param  int[]  $order  positions de modules (r*N+c) triées par importance
      */
     public function eliminate(array $order): void
     {
@@ -160,7 +165,7 @@ final class Solver
     /** @return array{0:string,1:string} [modules prédits (packés), URL] pour un masque donné */
     public function solve(string $targetPacked, int $mask): array
     {
-        $cur = Oracle::render($this->baseUrl, $mask);
+        $cur = Oracle::render($this->baseUrl, $mask, $this->spec->version);
         $sol = str_repeat("\0", strlen($this->comp[0]));
         foreach ($this->pivots as [$pos, $piv]) {
             if (Bits::get($cur, $pos) !== Bits::get($targetPacked, $pos)) {

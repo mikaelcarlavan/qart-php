@@ -14,18 +14,18 @@ use chillerlan\QRCode\QROptions;
  */
 final class Oracle
 {
-    /** Rend l'URL en matrice de bits packée (chaîne de 407 octets, 3249 bits). */
-    public static function render(string $url, int $mask): string
+    /** Rend l'URL en matrice de bits packée (n*n bits, MSB d'abord). */
+    public static function render(string $url, int $mask, int $version = QArtSpec::DEFAULT_VERSION): string
     {
         $qr = new QRCode(new QROptions([
-            'version'      => 10,
-            'eccLevel'     => EccLevel::L,
-            'maskPattern'  => $mask,
+            'version' => $version,
+            'eccLevel' => EccLevel::L,
+            'maskPattern' => $mask,
             'addQuietzone' => false,
         ]));
         $qr->addByteSegment($url);
         $m = $qr->getQRMatrix()->matrix(true);
-        $n = QArtSpec::N;
+        $n = 17 + 4 * $version;
         $packed = str_repeat("\0", intdiv($n * $n + 7, 8));
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {

@@ -5,8 +5,20 @@ Reed-Solomon du QR (approche QArt), rendue en halftone couleur. L'URL
 décodée = préfixe fixe + identifiant unique (série + solution) pour lookup
 serveur.
 
-Périmètre volontairement figé pour la v1 : **QR version 10, ECC L**
-(57×57 modules, 271 caractères).
+**Multi-versions : QR v1 à v40, ECC L.** La version détermine la grille
+(17 + 4×v modules de côté) et la capacité (v5 : 106 caractères, v10 : 271,
+v40 : 2953). Les tables par version (blocs Reed-Solomon, alignement) sont
+dérivées de chillerlan — la même librairie qui sert d'oracle.
+
+```php
+new QArtGenerator(prefix: 'https://sqr.art/', version: 5);   // logos simples
+QArtGenerator::suggestVersion('photo.jpg');                  // heuristique 5|10|15
+```
+
+Coût et mémoire croissent vite avec la version : v5 < 1 s, v10 ~1 s (cache
+chaud), v15 ~20 s à froid et ~400 Mo. Au-delà de v20, l'élimination
+gaussienne en PHP pur devient prohibitive (voir la piste FFI/Rust de la
+feuille de route) — la démo se limite à v5/v10/v15.
 
 ## Prérequis
 
@@ -115,9 +127,9 @@ La suite couvre : mapping bit→module contre le rendu réel (0 erreur sur les
 affine (32 valeurs URL-safe H-W/h-w), cas limites d'image, génération de
 bout en bout validée par décodage, déterminisme et cache.
 
-## Limites connues (v1)
+## Limites connues
 
-- Câblé v10-L. Multi-versions/multi-ECC : voir la feuille de route v2.
+- ECC figé à L. Multi-ECC (M/Q/H) : voir la feuille de route v2.
 - La zone préfixe/header (bas droite) reste structurellement non contrôlable.
 - Taille physique minimale d'impression recommandée : ~4×4 cm à 300 dpi
   (le halftone exige ~3× plus de résolution qu'un QR standard).

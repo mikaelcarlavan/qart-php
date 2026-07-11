@@ -11,18 +11,27 @@ use SqrArt\QArt\Exception\ImageException;
  * Préparation de l'image : recadrage carré centré, autocontraste,
  * dithering Atkinson, cible et confiance par module.
  *
- * Cas limites gérés : formats PNG/JPEG/GIF/WebP/BMP, palettes et alpha
- * (aplatis sur fond blanc), image trop petite (upscale + avertissement),
- * contraste dégénéré (avertissement, ou refus si inexploitable).
+ * La grille dépend de la version QR visée : n modules de côté, 7 sous-pixels
+ * par module. Cas limites gérés : formats PNG/JPEG/GIF/WebP/BMP, palettes et
+ * alpha (aplatis sur fond blanc), image trop petite (upscale +
+ * avertissement), contraste dégénéré (avertissement, ou refus si
+ * inexploitable).
  */
 final class ImagePipeline
 {
-    public const S  = 7;                       // sous-pixels par module
-    public const D  = 3;                       // point central forcé
-    public const HI = QArtSpec::N * self::S;   // 399
+    public const S = 7;    // sous-pixels par module
+
+    public const D = 3;    // point central forcé
 
     private const CONTRAST_REJECT = 0.02;
-    private const CONTRAST_WARN   = 0.15;
+
+    private const CONTRAST_WARN = 0.15;
+
+    /** Modules de côté (dépend de la version QR). */
+    public readonly int $n;
+
+    /** Côté de la grille de sous-pixels (n * S). */
+    public readonly int $hi;
 
     /** @var float[][] luminance 0..1 après autocontraste */
     public array $gray;
@@ -42,38 +51,42 @@ final class ImagePipeline
     /** @var string[] avertissements non bloquants (upscale, faible contraste…) */
     public array $warnings = [];
 
-    public static function fromFile(string $path): self
+    public static function fromFile(string $path, int $modules = 57): self
     {
         $data = @file_get_contents($path);
         if ($data === false) {
             throw new ImageException("image illisible: $path");
         }
 
-        return self::fromString($data);
+        return self::fromString($data, $modules);
     }
 
-    public static function fromString(string $data): self
+    public static function fromString(string $data, int $modules = 57): self
     {
         $src = @imagecreatefromstring($data);
         if ($src === false) {
             throw new ImageException('format d\'image non reconnu ou fichier corrompu');
         }
 
-        return new self($src);
+        return new self($src, $modules);
     }
 
-    public function __construct(GdImage $src)
+    public function __construct(GdImage $src, int $modules = 57)
     {
+        $this->n = $modules;
+        $this->hi = $modules * self::S;
+        $hi = $this->hi;
+
         $w = imagesx($src);
         $h = imagesy($src);
         $side = min($w, $h);
         if ($side < 1) {
             throw new ImageException('image vide');
         }
-        if ($side < self::HI) {
+        if ($side < $hi) {
             $this->warnings[] = sprintf(
                 'image %dx%d plus petite que %d px de côté : agrandie, le rendu peut être flou',
-                $w, $h, self::HI
+                $w, $h, $hi
             );
         }
 
@@ -83,14 +96,13 @@ final class ImagePipeline
         imagecopy($flat, $src, 0, 0, 0, 0, $w, $h);
 
         // Recadrage carré centré + redimensionnement à la grille de sous-pixels
-        $sq = imagecreatetruecolor(self::HI, self::HI);
+        $sq = imagecreatetruecolor($hi, $hi);
         imagecopyresampled(
             $sq, $flat, 0, 0,
             intdiv($w - $side, 2), intdiv($h - $side, 2),
-            self::HI, self::HI, $side, $side
+            $hi, $hi, $side, $side
         );
 
-        $hi = self::HI;
         $gray = [];
         $rgb = [];
         for ($y = 0; $y < $hi; $y++) {
@@ -154,7 +166,7 @@ final class ImagePipeline
         $this->dith = $dith;
 
         // Cible + confiance par module (coeur 3x3 du module)
-        $n = QArtSpec::N;
+        $n = $this->n;
         $s = self::S;
         $m = intdiv($s, 2);
         for ($r = 0; $r < $n; $r++) {

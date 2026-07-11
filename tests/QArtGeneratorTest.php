@@ -8,6 +8,7 @@ use chillerlan\QRCode\QRCode;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Cache\FileMatrixCache;
 use SqrArt\QArt\DotShape;
+use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\FinderShape;
 use SqrArt\QArt\QArtGenerator;
 use SqrArt\QArt\QArtSpec;
@@ -75,8 +76,8 @@ final class QArtGeneratorTest extends TestCase
 
         $this->assertFileExists($out);
         $this->assertStringStartsWith(self::PREFIX, $res->url);
-        $this->assertSame(QArtSpec::CAPACITY, strlen($res->url));
-        $this->assertSame(QArtSpec::CAPACITY - strlen(self::PREFIX), strlen($res->suffix));
+        $this->assertSame((new QArtSpec)->capacity, strlen($res->url));
+        $this->assertSame((new QArtSpec)->capacity - strlen(self::PREFIX), strlen($res->suffix));
         $this->assertSame(substr($res->suffix, 0, Solver::SERIAL), $res->serial);
         $this->assertMatchesRegularExpression('/^[H-Wh-w]{8}$/', $res->serial);
         $this->assertGreaterThanOrEqual(0, $res->mask);
@@ -132,6 +133,61 @@ final class QArtGeneratorTest extends TestCase
         $im->writeImage($raster);
         $decoded = (new QRCode)->readFromFile($raster);
         $this->assertSame($res->url, $decoded->data, 'le SVG rastérisé doit décoder la même URL');
+    }
+
+    public function test_generates_at_version_5(): void
+    {
+        $out = self::$dir.'/qr-v5.png';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            random: new SeededRandom(3),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            version: 5,
+        );
+        $res = $gen->generate(self::$imagePath, $out);
+
+        $spec = new QArtSpec(5);
+        $this->assertSame($spec->capacity, strlen($res->url));
+        $this->assertSame(1, $res->attempts, 'le décodage v5 doit réussir du premier coup');
+        // 37 modules + 2x4 de bord, 7 sous-pixels, échelle 3
+        [$w] = getimagesize($out);
+        $this->assertSame((37 + 8) * 7 * 3, $w);
+    }
+
+    public function test_version_too_small_for_prefix_is_rejected(): void
+    {
+        $gen = new QArtGenerator(prefix: self::PREFIX, version: 1);
+        $this->expectException(QArtException::class);
+        $gen->generate(self::$imagePath, self::$dir.'/qr-v1.png');
+    }
+
+    public function test_suggest_version_scales_with_detail(): void
+    {
+        // aplat simple -> version basse
+        $flat = self::$dir.'/flat.png';
+        $im = imagecreatetruecolor(300, 300);
+        imagefilledrectangle($im, 0, 0, 299, 299, 0xE0E0E0);
+        imagefilledellipse($im, 150, 150, 200, 200, 0x203040);
+        imagepng($im, $flat);
+
+        // structure dense contrastée (survit au sous-échantillonnage) -> version haute
+        $busy = self::$dir.'/busy.png';
+        $im2 = imagecreatetruecolor(300, 300);
+        $seed = 12345;
+        for ($by = 0; $by < 300; $by += 12) {
+            for ($bx = 0; $bx < 300; $bx += 12) {
+                $seed = ($seed * 1103515245 + 12345) & 0x7FFFFFFF;
+                $v = $seed & 0xFF;
+                imagefilledrectangle($im2, $bx, $by, $bx + 11, $by + 11, ($v << 16) | ($v << 8) | $v);
+            }
+        }
+        imagepng($im2, $busy);
+
+        $low = QArtGenerator::suggestVersion($flat);
+        $high = QArtGenerator::suggestVersion($busy);
+        $this->assertLessThan($high, $low);
+        $this->assertContains($low, [5, 10, 15]);
+        $this->assertContains($high, [5, 10, 15]);
     }
 
     public function test_print_profile_produces_larger_output(): void

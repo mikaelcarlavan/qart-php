@@ -12,7 +12,7 @@ use SqrArt\QArt\Solver;
 
 final class SolverTest extends TestCase
 {
-    public function testCosetAlphabetIs32UrlSafeLetters(): void
+    public function test_coset_alphabet_is32_url_safe_letters(): void
     {
         $coset = [Solver::OFFSET];
         foreach (Solver::BASIS as $v) {
@@ -32,9 +32,9 @@ final class SolverTest extends TestCase
         }
     }
 
-    public function testSerialUsesOnlyCosetAlphabetAndIsSeedable(): void
+    public function test_serial_uses_only_coset_alphabet_and_is_seedable(): void
     {
-        $spec = new QArtSpec();
+        $spec = new QArtSpec;
         $prefix = 'https://sqr.art/';
         $s1 = new Solver($spec, $prefix, new SeededRandom(42));
         $s2 = new Solver($spec, $prefix, new SeededRandom(42));
@@ -49,23 +49,23 @@ final class SolverTest extends TestCase
         $this->assertNotSame($serial1, $reseeded, 'reseedSerial doit changer la série');
     }
 
-    public function testBaseUrlHasFullCapacity(): void
+    public function test_base_url_has_full_capacity(): void
     {
-        $spec = new QArtSpec();
+        $spec = new QArtSpec;
         $solver = new Solver($spec, 'https://sqr.art/', new SeededRandom(1));
-        $this->assertSame(QArtSpec::CAPACITY, strlen($solver->baseUrl));
+        $this->assertSame($spec->capacity, strlen($solver->baseUrl));
         $this->assertStringStartsWith('https://sqr.art/', $solver->baseUrl);
     }
 
-    public function testRejectsOversizedPrefix(): void
+    public function test_rejects_oversized_prefix(): void
     {
         $this->expectException(QArtException::class);
-        new Solver(new QArtSpec(), str_repeat('a', QArtSpec::CAPACITY), new SeededRandom(1));
+        new Solver(new QArtSpec, str_repeat('a', 300), new SeededRandom(1));
     }
 
-    public function testRejectsNonAsciiPrefix(): void
+    public function test_rejects_non_ascii_prefix(): void
     {
         $this->expectException(QArtException::class);
-        new Solver(new QArtSpec(), "https://sqr.art/é", new SeededRandom(1));
+        new Solver(new QArtSpec, 'https://sqr.art/é', new SeededRandom(1));
     }
 }

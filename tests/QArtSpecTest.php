@@ -4,14 +4,35 @@ declare(strict_types=1);
 
 namespace SqrArt\QArt\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Bits;
+use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\Oracle;
 use SqrArt\QArt\QArtSpec;
 use SqrArt\QArt\Random\SeededRandom;
 
 final class QArtSpecTest extends TestCase
 {
+    /**
+     * Versions couvrant les variantes structurelles : header 8 vs 16 bits,
+     * version info absente/présente, bits résiduels 0/3/4/7, blocs de
+     * tailles inégales, 1 seul bloc (v2).
+     *
+     * @return array<string, array{0:int,1:int}> [version, remainder attendu]
+     */
+    public static function versions(): array
+    {
+        return [
+            'v2 (1 bloc, header 8b, rem 7)' => [2, 7],
+            'v5 (blocs inégaux, header 8b)' => [5, 7],
+            'v7 (version info, rem 0)' => [7, 0],
+            'v10 (référence historique)' => [10, 0],
+            'v14 (rem 3)' => [14, 3],
+            'v21 (rem 4)' => [21, 4],
+        ];
+    }
+
     /** Formules officielles des 8 masques QR. */
     private static function maskAt(int $mask, int $i, int $j): bool
     {
@@ -27,49 +48,58 @@ final class QArtSpecTest extends TestCase
         };
     }
 
-    public function testZigzagCoversAllDataModules(): void
+    #[DataProvider('versions')]
+    public function test_zigzag_covers_all_data_modules(int $version, int $expectedRemainder): void
     {
-        $spec = new QArtSpec();
-        $this->assertCount(2768, $spec->zigzag);
+        $spec = new QArtSpec($version);
+        $total = $spec->dataCodewords + count($spec->blockSizes) * $spec->eccPerBlock;
+
+        $this->assertSame($expectedRemainder, $spec->remainderBits);
+        $this->assertCount(8 * $total + $expectedRemainder, $spec->zigzag);
+        $this->assertSame(17 + 4 * $version, $spec->n);
 
         // aucun doublon, aucun module de fonction
         $seen = [];
         foreach ($spec->zigzag as [$r, $c]) {
-            $this->assertFalse($spec->fmap[$r][$c], "module de fonction ($r,$c) dans le zigzag");
+            $this->assertFalse($spec->fmap[$r][$c], "v$version: module de fonction ($r,$c) dans le zigzag");
             $seen["$r-$c"] = true;
         }
-        $this->assertCount(2768, $seen);
+        $this->assertCount(count($spec->zigzag), $seen);
     }
 
-    public function testInterleaveIsABijection(): void
+    #[DataProvider('versions')]
+    public function test_interleave_is_a_bijection(int $version): void
     {
+        $spec = new QArtSpec($version);
         $positions = [];
-        for ($p = 0; $p < QArtSpec::DATA_CODEWORDS; $p++) {
-            $positions[] = QArtSpec::interleave($p);
+        for ($p = 0; $p < $spec->dataCodewords; $p++) {
+            $positions[] = $spec->interleave($p);
         }
         sort($positions);
-        $this->assertSame(range(0, QArtSpec::DATA_CODEWORDS - 1), $positions);
+        $this->assertSame(range(0, $spec->dataCodewords - 1), $positions);
     }
 
     /**
      * Chaque bit de chaque caractère de l'URL doit se retrouver au module
      * prédit par charCoords() dans le rendu réel, pour les 8 masques.
+     * C'est LE test qui valide géométrie, tables et entrelacement.
      */
-    public function testCharCoordsMatchOracleForAllMasks(): void
+    #[DataProvider('versions')]
+    public function test_char_coords_match_oracle_for_all_masks(int $version): void
     {
-        $spec = new QArtSpec();
+        $spec = new QArtSpec($version);
         $alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-        $rng = new SeededRandom(1);
+        $rng = new SeededRandom($version);
         $url = 'https://sqr.art/';
-        for ($i = strlen($url); $i < QArtSpec::CAPACITY; $i++) {
+        for ($i = strlen($url); $i < $spec->capacity; $i++) {
             $url .= $alpha[$rng->int(0, 63)];
         }
 
-        $n = QArtSpec::N;
+        $n = $spec->n;
         foreach (range(0, 7) as $mask) {
-            $m = Oracle::render($url, $mask);
+            $m = Oracle::render($url, $mask, $version);
             $bad = 0;
-            for ($k = 0; $k < QArtSpec::CAPACITY; $k++) {
+            for ($k = 0; $k < $spec->capacity; $k++) {
                 $v = ord($url[$k]);
                 $coords = $spec->charCoords($k);
                 for ($b = 0; $b < 8; $b++) {
@@ -81,7 +111,21 @@ final class QArtSpecTest extends TestCase
                     }
                 }
             }
-            $this->assertSame(0, $bad, "masque $mask : $bad erreurs de mapping");
+            $this->assertSame(0, $bad, "v$version masque $mask : $bad erreurs de mapping");
         }
+    }
+
+    public function test_rejects_invalid_versions(): void
+    {
+        $this->expectException(QArtException::class);
+        new QArtSpec(41);
+    }
+
+    public function test_capacity_known_values(): void
+    {
+        $this->assertSame(17, (new QArtSpec(1))->capacity);
+        $this->assertSame(106, (new QArtSpec(5))->capacity);
+        $this->assertSame(271, (new QArtSpec(10))->capacity);
+        $this->assertSame(2953, (new QArtSpec(40))->capacity);
     }
 }

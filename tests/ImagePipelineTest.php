@@ -7,12 +7,11 @@ namespace SqrArt\QArt\Tests;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Exception\ImageException;
 use SqrArt\QArt\ImagePipeline;
-use SqrArt\QArt\QArtSpec;
 
 final class ImagePipelineTest extends TestCase
 {
     /** Image de test contrastée : dégradé + damier. */
-    private static function testImage(int $size): \GdImage
+    private static function makeTestImage(int $size): \GdImage
     {
         $im = imagecreatetruecolor($size, $size);
         for ($y = 0; $y < $size; $y++) {
@@ -29,10 +28,10 @@ final class ImagePipelineTest extends TestCase
         return $im;
     }
 
-    public function testComputesTargetAndConfidenceGrids(): void
+    public function test_computes_target_and_confidence_grids(): void
     {
-        $img = new ImagePipeline(self::testImage(500));
-        $n = QArtSpec::N;
+        $img = new ImagePipeline(self::makeTestImage(500));
+        $n = 57;
         $this->assertCount($n, $img->target);
         $this->assertCount($n, $img->conf);
         foreach ($img->conf as $row) {
@@ -44,25 +43,25 @@ final class ImagePipelineTest extends TestCase
         $this->assertSame([], $img->warnings);
     }
 
-    public function testAcceptsJpegAndWebpAndPng(): void
+    public function test_accepts_jpeg_and_webp_and_png(): void
     {
-        $src = self::testImage(450);
+        $src = self::makeTestImage(450);
         foreach (['imagejpeg', 'imagewebp', 'imagepng'] as $fn) {
             ob_start();
             $fn($src);
             $data = ob_get_clean();
             $img = ImagePipeline::fromString($data);
-            $this->assertCount(QArtSpec::N, $img->target, "échec pour $fn");
+            $this->assertCount(57, $img->target, "échec pour $fn");
         }
     }
 
-    public function testRejectsGarbageData(): void
+    public function test_rejects_garbage_data(): void
     {
         $this->expectException(ImageException::class);
         ImagePipeline::fromString('ceci n\'est pas une image');
     }
 
-    public function testRejectsFlatImage(): void
+    public function test_rejects_flat_image(): void
     {
         $im = imagecreatetruecolor(500, 500);
         imagefilledrectangle($im, 0, 0, 499, 499, 0x808080);
@@ -70,7 +69,7 @@ final class ImagePipelineTest extends TestCase
         new ImagePipeline($im);
     }
 
-    public function testWarnsOnLowContrast(): void
+    public function test_warns_on_low_contrast(): void
     {
         $im = imagecreatetruecolor(500, 500);
         for ($y = 0; $y < 500; $y++) {
@@ -84,15 +83,15 @@ final class ImagePipelineTest extends TestCase
         $this->assertStringContainsString('contraste', implode(' ', $img->warnings));
     }
 
-    public function testWarnsOnSmallImageAndUpscales(): void
+    public function test_warns_on_small_image_and_upscales(): void
     {
-        $img = new ImagePipeline(self::testImage(120));
+        $img = new ImagePipeline(self::makeTestImage(120));
         $this->assertNotEmpty($img->warnings);
         $this->assertStringContainsString('agrandie', implode(' ', $img->warnings));
-        $this->assertCount(QArtSpec::N, $img->target);
+        $this->assertCount(57, $img->target);
     }
 
-    public function testFlattensAlphaOnWhite(): void
+    public function test_flattens_alpha_on_white(): void
     {
         $im = imagecreatetruecolor(500, 500);
         imagesavealpha($im, true);
