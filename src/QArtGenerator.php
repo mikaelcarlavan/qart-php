@@ -32,7 +32,7 @@ final class QArtGenerator
         private readonly int $maxAttempts = 3,
         private readonly bool $validateDecode = true,
     ) {
-        $this->random = $random ?? new SystemRandom();
+        $this->random = $random ?? new SystemRandom;
         if ($errorBudgetPerBlock < 0 || $errorBudgetPerBlock > 4) {
             throw new QArtException('errorBudgetPerBlock doit être entre 0 et 4');
         }
@@ -41,10 +41,19 @@ final class QArtGenerator
         }
     }
 
-    public function generate(string $imagePath, string $outPng, ?RenderProfile $profile = null): GenerationResult
-    {
+    /**
+     * @param  string|null  $outSvg  chemin de sortie SVG optionnel (vectoriel,
+     *                               imprimable à toute taille) — même matrice
+     *                               que le PNG, validé via le décodage du PNG
+     */
+    public function generate(
+        string $imagePath,
+        string $outPng,
+        ?RenderProfile $profile = null,
+        ?string $outSvg = null,
+    ): GenerationResult {
         $profile ??= RenderProfile::screen();
-        $spec = new QArtSpec();
+        $spec = new QArtSpec;
         $img = ImagePipeline::fromFile($imagePath);
         $n = QArtSpec::N;
 
@@ -57,7 +66,7 @@ final class QArtGenerator
                 if ($img->target[$r][$c]) {
                     Bits::set($tp, $p, 1);
                 }
-                if (!$spec->fmap[$r][$c]) {
+                if (! $spec->fmap[$r][$c]) {
                     $prio[] = [$img->conf[$r][$c], $p];
                 }
             }
@@ -83,7 +92,10 @@ final class QArtGenerator
 
             Renderer::colorHalftone($img, $spec, $matrix, $outPng, $profile);
 
-            if (!$this->validateDecode || $this->decodesTo($outPng, $url)) {
+            if (! $this->validateDecode || $this->decodesTo($outPng, $url)) {
+                if ($outSvg !== null) {
+                    SvgRenderer::toFile($img, $spec, $matrix, $outSvg, $profile);
+                }
                 $plen = strlen($this->prefix);
 
                 return new GenerationResult(
@@ -94,6 +106,7 @@ final class QArtGenerator
                     pngPath: $outPng,
                     attempts: $attempt,
                     warnings: $img->warnings,
+                    svgPath: $outSvg,
                 );
             }
         }

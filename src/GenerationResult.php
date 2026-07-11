@@ -15,6 +15,6 @@ final class GenerationResult
         public readonly string $pngPath,
         public readonly int $attempts,
         public readonly array $warnings,
-    ) {
-    }
+        public readonly ?string $svgPath = null,
+    ) {}
 }

@@ -4,33 +4,17 @@ declare(strict_types=1);
 
 namespace SqrArt\QArt;
 
+use GdImage;
 use SqrArt\QArt\Exception\QArtException;
 
 /**
- * Rendu halftone couleur : texture dithérée teintée par l'image, points
- * centraux DxD forcés à la valeur des modules, couleur contrainte en
- * luminance (teinte libre, luminance imposée).
+ * Rendu halftone couleur raster (GD) : texture dithérée teintée par l'image,
+ * points DxD forcés à la valeur des modules, couleur contrainte en
+ * luminance. Géométrie alignée sur SvgRenderer (mêmes formes de points,
+ * mêmes finders) pour que la préview PNG corresponde au SVG.
  */
 final class Renderer
 {
-    /** Ajuste une couleur [r,g,b] à la luminance cible en gardant la teinte. */
-    private static function setLuma(array $c, float $tl): array
-    {
-        $l = 0.299 * $c[0] + 0.587 * $c[1] + 0.114 * $c[2];
-        if ($l >= $tl) {
-            $ratio = $l > 1e-6 ? $tl / $l : 0.0;
-
-            return [min(1, $c[0] * $ratio), min(1, $c[1] * $ratio), min(1, $c[2] * $ratio)];
-        }
-        $t = (1 - $l) > 1e-6 ? ($tl - $l) / (1 - $l) : 1.0;
-
-        return [
-            min(1, $c[0] + (1 - $c[0]) * $t),
-            min(1, $c[1] + (1 - $c[1]) * $t),
-            min(1, $c[2] + (1 - $c[2]) * $t),
-        ];
-    }
-
     /** @param int[][] $matrix modules finaux (après budget d'erreur) */
     public static function colorHalftone(
         ImagePipeline $img,
@@ -49,43 +33,121 @@ final class Renderer
         $size = ($hi + 2 * $border) * $scale;
         $im = imagecreatetruecolor($size, $size);
         imagefilledrectangle($im, 0, 0, $size, $size, 0xFFFFFF);
+        imageantialias($im, true);
 
-        $put = function (int $y, int $x, array $c) use ($im, $border, $scale): void {
-            $col = ((int) round($c[0] * 255) << 16) | ((int) round($c[1] * 255) << 8) | (int) round($c[2] * 255);
+        $toInt = fn (array $c): int => ((int) round($c[0] * 255) << 16)
+            | ((int) round($c[1] * 255) << 8)
+            | (int) round($c[2] * 255);
+        $put = function (int $y, int $x, array $c) use ($im, $border, $scale, $toInt): void {
             $px = ($x + $border) * $scale;
             $py = ($y + $border) * $scale;
-            imagefilledrectangle($im, $px, $py, $px + $scale - 1, $py + $scale - 1, $col);
+            imagefilledrectangle($im, $px, $py, $px + $scale - 1, $py + $scale - 1, $toInt($c));
         };
 
+        $rounded = $profile->finderShape === FinderShape::Rounded;
+        $finderInt = $toInt($profile->finderRgb());
+
+        // 1. Texture + modules de fonction
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {
                 $y0 = $r * $s;
                 $x0 = $c * $s;
-                $bit = $matrix[$r][$c];
                 if ($spec->fmap[$r][$c]) {
+                    $inFinder = self::inFinder($r, $c, $n);
+                    if ($rounded && $inFinder) {
+                        continue;   // zone repeinte en formes dédiées plus bas
+                    }
+                    $dark = (bool) $matrix[$r][$c];
+                    $fill = $dark ? ($inFinder ? $finderInt : 0x000000) : 0xFFFFFF;
                     for ($y = 0; $y < $s; $y++) {
                         for ($x = 0; $x < $s; $x++) {
-                            $put($y0 + $y, $x0 + $x, $bit ? [0, 0, 0] : [1, 1, 1]);
+                            $px = ($x0 + $x + $border) * $scale;
+                            $py = ($y0 + $y + $border) * $scale;
+                            imagefilledrectangle($im, $px, $py, $px + $scale - 1, $py + $scale - 1, $fill);
                         }
                     }
+
                     continue;
                 }
                 for ($y = 0; $y < $s; $y++) {
                     for ($x = 0; $x < $s; $x++) {
-                        $inDot = $y >= $off && $y < $off + $d && $x >= $off && $x < $off + $d;
+                        $dark = $img->dith[$y0 + $y][$x0 + $x] === 1;
                         $base = $img->rgb[$y0 + $y][$x0 + $x];
-                        if ($inDot) {
-                            $put($y0 + $y, $x0 + $x, self::setLuma($base, $bit ? $profile->lDotDark : $profile->lDotLight));
-                        } else {
-                            $dark = $img->dith[$y0 + $y][$x0 + $x] === 1;
-                            $put($y0 + $y, $x0 + $x, self::setLuma($base, $dark ? $profile->lDark : $profile->lLight));
-                        }
+                        $put($y0 + $y, $x0 + $x, Luma::apply($base, $dark ? $profile->lDark : $profile->lLight));
                     }
                 }
             }
         }
-        if (!imagepng($im, $out)) {
+
+        // 2. Points de données par-dessus la texture
+        $half = $d * $scale / 2;
+        for ($r = 0; $r < $n; $r++) {
+            for ($c = 0; $c < $n; $c++) {
+                if ($spec->fmap[$r][$c]) {
+                    continue;
+                }
+                $bit = $matrix[$r][$c];
+                $y0 = $r * $s;
+                $x0 = $c * $s;
+                $rgb = $img->rgb[$y0 + $off + 1][$x0 + $off + 1];
+                $fill = $toInt(Luma::apply($rgb, $bit ? $profile->lDotDark : $profile->lDotLight));
+                $px = ($x0 + $off + $border) * $scale;
+                $py = ($y0 + $off + $border) * $scale;
+                $cx = (int) round($px + $half);
+                $cy = (int) round($py + $half);
+                $side = $d * $scale;
+                match ($profile->dotShape) {
+                    DotShape::Square => imagefilledrectangle($im, $px, $py, $px + $side - 1, $py + $side - 1, $fill),
+                    DotShape::Round => imagefilledellipse($im, $cx, $cy, $side, $side, $fill),
+                    DotShape::Diamond => imagefilledpolygon($im, [
+                        $cx, $py,
+                        $px + $side - 1, $cy,
+                        $cx, $py + $side - 1,
+                        $px, $cy,
+                    ], $fill),
+                };
+            }
+        }
+
+        // 3. Finders arrondis : fond blanc 8x8 (séparateur compris) puis
+        //    anneau 7x7 et coeur 3x3 en rounded rects
+        if ($rounded) {
+            foreach ([[0, 0], [0, $n - 7], [$n - 7, 0]] as [$fr, $fc]) {
+                $bx = ($fc * $s + $border) * $scale;
+                $by = ($fr * $s + $border) * $scale;
+                $ms = $s * $scale;
+                // fond : zone 8x8 côté intérieur (le séparateur)
+                $wx0 = $fc === 0 ? $bx : $bx - $ms;
+                $wy0 = $fr === 0 ? $by : $by - $ms;
+                imagefilledrectangle($im, $wx0, $wy0, $wx0 + 8 * $ms - 1, $wy0 + 8 * $ms - 1, 0xFFFFFF);
+                self::roundedRect($im, $bx, $by, 7 * $ms, (int) round(7 * $ms / 3), $finderInt);
+                self::roundedRect($im, $bx + $ms, $by + $ms, 5 * $ms, (int) round(5 * $ms / 3.75), 0xFFFFFF);
+                self::roundedRect($im, $bx + 2 * $ms, $by + 2 * $ms, 3 * $ms, $ms, $finderInt);
+            }
+        }
+
+        if (! imagepng($im, $out)) {
             throw new QArtException("écriture du PNG impossible: $out");
+        }
+    }
+
+    private static function inFinder(int $r, int $c, int $n): bool
+    {
+        return ($r < 7 && $c < 7)
+            || ($r < 7 && $c >= $n - 7)
+            || ($r >= $n - 7 && $c < 7);
+    }
+
+    /** Carré arrondi plein : deux rects + quatre disques de coin. */
+    private static function roundedRect(GdImage $im, int $x, int $y, int $side, int $radius, int $color): void
+    {
+        $x1 = $x + $side - 1;
+        $y1 = $y + $side - 1;
+        imagefilledrectangle($im, $x + $radius, $y, $x1 - $radius, $y1, $color);
+        imagefilledrectangle($im, $x, $y + $radius, $x1, $y1 - $radius, $color);
+        foreach ([[$x + $radius, $y + $radius], [$x1 - $radius, $y + $radius],
+            [$x + $radius, $y1 - $radius], [$x1 - $radius, $y1 - $radius]] as [$cx, $cy]) {
+            imagefilledellipse($im, $cx, $cy, 2 * $radius, 2 * $radius, $color);
         }
     }
 }

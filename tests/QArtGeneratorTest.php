@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace SqrArt\QArt\Tests;
 
+use chillerlan\QRCode\QRCode;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Cache\FileMatrixCache;
+use SqrArt\QArt\DotShape;
+use SqrArt\QArt\FinderShape;
 use SqrArt\QArt\QArtGenerator;
 use SqrArt\QArt\QArtSpec;
 use SqrArt\QArt\Random\SeededRandom;
@@ -22,6 +25,7 @@ final class QArtGeneratorTest extends TestCase
     private const PREFIX = 'https://sqr.art/';
 
     private static string $dir;
+
     private static string $imagePath;
 
     public static function setUpBeforeClass(): void
@@ -56,7 +60,7 @@ final class QArtGeneratorTest extends TestCase
         @rmdir(self::$dir);
     }
 
-    public function testGeneratesValidatedScannableQrCode(): void
+    public function test_generates_validated_scannable_qr_code(): void
     {
         $out = self::$dir.'/qr.png';
         $gen = new QArtGenerator(
@@ -96,7 +100,41 @@ final class QArtGeneratorTest extends TestCase
         $this->assertLessThan($cold, $warm, 'le cache de matrice doit accélérer la génération');
     }
 
-    public function testPrintProfileProducesLargerOutput(): void
+    public function test_generates_svg_alongside_png_and_svg_decodes(): void
+    {
+        $outPng = self::$dir.'/qr-svg.png';
+        $outSvg = self::$dir.'/qr-svg.svg';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            random: new SeededRandom(11),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+        );
+        $profile = RenderProfile::screen()
+            ->withDotShape(DotShape::Round)
+            ->withFinderShape(FinderShape::Rounded);
+        $res = $gen->generate(self::$imagePath, $outPng, $profile, $outSvg);
+
+        $this->assertSame($outSvg, $res->svgPath);
+        $this->assertFileExists($outSvg);
+        $this->assertNotFalse(@simplexml_load_file($outSvg), 'SVG mal formé');
+
+        // Le PNG (même matrice) est validé par décodage ; si Imagick sait
+        // rastériser le SVG, on vérifie aussi le vectoriel de bout en bout.
+        if (! extension_loaded('imagick') || \Imagick::queryFormats('SVG') === []) {
+            $this->markTestIncomplete('Imagick/SVG indisponible : décodage du SVG rastérisé non vérifié');
+        }
+        $im = new \Imagick;
+        $im->setBackgroundColor('white');
+        $im->setResolution(150, 150);
+        $im->readImage($outSvg);
+        $im->setImageFormat('png');
+        $raster = self::$dir.'/qr-svg-raster.png';
+        $im->writeImage($raster);
+        $decoded = (new QRCode)->readFromFile($raster);
+        $this->assertSame($res->url, $decoded->data, 'le SVG rastérisé doit décoder la même URL');
+    }
+
+    public function test_print_profile_produces_larger_output(): void
     {
         $out = self::$dir.'/qr-print.png';
         $gen = new QArtGenerator(

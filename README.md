@@ -42,6 +42,35 @@ embarqué dans chillerlan) et l'URL vérifiée. En cas d'échec, régénération
 avec une autre série et un budget d'erreur réduit, puis
 `GenerationFailedException`.
 
+### Sortie SVG (print-ready)
+
+Passer un 4e argument à `generate()` produit aussi un SVG vectoriel —
+imprimable à toute taille sans artefact, même matrice que le PNG (qui reste
+la référence validée par décodage) :
+
+```php
+$result = $generator->generate('photo.jpg', 'qr.png', $profile, 'qr.svg');
+$result->svgPath; // 'qr.svg'
+```
+
+Le poids est maîtrisé par fusion des sous-pixels en plages horizontales
+(couleurs quantifiées à 32 niveaux par canal, imperceptible).
+
+### Styles de points et finders
+
+```php
+use SqrArt\QArt\{DotShape, FinderShape};
+
+$profile = RenderProfile::screen()
+    ->withDotShape(DotShape::Round)          // Square | Round | Diamond
+    ->withFinderShape(FinderShape::Rounded)  // Square | Rounded
+    ->withFinderColor('#1a2b4c');            // couleur de marque sombre
+```
+
+La couleur de finder est contrainte en luminance (<= 0.35) : une couleur
+trop claire casserait la détection et est refusée (`QArtException`). Les
+styles s'appliquent aux deux sorties (PNG et SVG).
+
 ### Profils de rendu
 
 - `RenderProfile::screen()` — luminances douces, affichage écran (défaut) ;
