@@ -4,6 +4,14 @@
     "type": "library",
     "license": "MIT",
     "keywords": ["qrcode", "qart", "halftone", "art"],
+    "homepage": "https://sqr.art",
+    "authors": [
+        {
+            "name": "Mikael Carlavan",
+            "email": "contact@mika-carl.fr",
+            "homepage": "https://sqr.art"
+        }
+    ],
     "require": {
         "php": "^8.2",
         "ext-gd": "*",
