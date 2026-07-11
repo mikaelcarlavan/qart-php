@@ -9,11 +9,18 @@ use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\Random\RandomSource;
 
 /**
- * Solveur GF(2) : matrice génératrice empirique (une colonne par bit libre
- * de l'URL) + élimination gaussienne avec pivots par importance visuelle.
+ * Solveur GF(2) : matrice génératrice empirique + élimination gaussienne
+ * avec pivots par importance visuelle.
  *
- * La matrice génératrice ne dépend que de la longueur du préfixe (linéarité
- * du code) : elle est cachable via MatrixCache.
+ * Deux jeux de variables selon le mode :
+ * - Full : 5 bits (coset URL-safe) par caractère libre de l'URL ;
+ * - Short : 8 bits par octet de padding après le terminator. Les colonnes
+ *   sont sondées via des URLs pleine capacité : le pipeline QR (RS,
+ *   entrelacement, placement, masque) étant linéaire sur GF(2), la colonne
+ *   d'un bit du flux de données ne dépend pas du reste du contenu.
+ *
+ * La matrice ne dépend que de (version, mode, longueur du préfixe) :
+ * cachable via MatrixCache.
  */
 final class Solver
 {
@@ -26,10 +33,13 @@ final class Solver
 
     public string $baseUrl;
 
-    /** @var int[] indices des caractères libres */
-    public array $freeChars;
+    /** @var int[] mode Full : indices des caractères libres */
+    public array $freeChars = [];
 
-    /** @var string[] colonnes de la matrice génératrice (bitsets 3249 bits) */
+    /** @var int[] mode Short : positions de bits libres dans le flux de données */
+    public array $freeBits = [];
+
+    /** @var string[] colonnes de la matrice génératrice (bitsets n*n bits) */
     public array $cols = [];
 
     /** @var string[] composition de chaque colonne (bitsets nvars bits) */
@@ -45,6 +55,7 @@ final class Solver
         private readonly QArtSpec $spec,
         private readonly string $prefix,
         private readonly RandomSource $random,
+        private readonly UrlMode $mode = UrlMode::Full,
     ) {
         $plen = strlen($prefix);
         if ($plen < 1 || $plen + self::SERIAL >= $spec->capacity) {
@@ -65,13 +76,36 @@ final class Solver
         }
         $this->coset = $coset;
 
-        $chars = str_split($prefix);
-        for ($i = count($chars); $i < $spec->capacity; $i++) {
-            $chars[] = chr(self::OFFSET);
+        if ($this->mode === UrlMode::Full) {
+            $chars = str_split($prefix);
+            for ($i = count($chars); $i < $spec->capacity; $i++) {
+                $chars[] = chr(self::OFFSET);
+            }
+            $this->baseUrl = implode('', $chars);
+            $this->freeChars = range($plen + self::SERIAL, $spec->capacity - 1);
+        } else {
+            $this->baseUrl = $prefix.str_repeat(chr(self::OFFSET), self::SERIAL);
+            $start = self::firstFreeBit($spec, $plen);
+            // les bits au-delà de header + 8*capacité sont hors de portée des
+            // sondes pleine capacité (zone terminator) : on s'arrête avant
+            $end = $spec->headerBits + 8 * $spec->capacity;
+            if ($end - $start < 8) {
+                throw new QArtException(sprintf(
+                    'mode Short inutilisable en v%d avec ce préfixe : aucun octet de padding libre (utiliser UrlMode::Full)',
+                    $spec->version
+                ));
+            }
+            $this->freeBits = range($start, $end - 1);
         }
-        $this->baseUrl = implode('', $chars);
-        $this->freeChars = range($plen + self::SERIAL, $spec->capacity - 1);
         $this->reseedSerial();
+    }
+
+    /** Premier bit de padding libre : après contenu + terminator, aligné à l'octet. */
+    public static function firstFreeBit(QArtSpec $spec, int $prefixLen): int
+    {
+        $contentEnd = $spec->headerBits + 8 * ($prefixLen + self::SERIAL) + 4;   // + terminator
+
+        return intdiv($contentEnd + 7, 8) * 8;
     }
 
     /**
@@ -86,24 +120,27 @@ final class Solver
         }
     }
 
-    /** Clé de cache de la matrice : dépend de la version et de la longueur du préfixe. */
+    /** Clé de cache de la matrice : dépend de la version, du mode et de la longueur du préfixe. */
     public function cacheKey(): string
     {
         return sprintf(
-            'qart-v%dL-p%d-s%d-b%s',
-            $this->spec->version, strlen($this->prefix), self::SERIAL, dechex(array_sum(self::BASIS))
+            'qart-v%dL-%s-p%d-s%d-b%s',
+            $this->spec->version, $this->mode->value, strlen($this->prefix), self::SERIAL,
+            dechex(array_sum(self::BASIS))
         );
     }
 
     public function buildGenerator(?MatrixCache $cache = null): void
     {
-        $nvars = count($this->freeChars) * count(self::BASIS);
+        $nvars = $this->mode === UrlMode::Full
+            ? count($this->freeChars) * count(self::BASIS)
+            : count($this->freeBits);
         $compLen = intdiv($nvars + 7, 8);
 
         $cols = $cache?->get($this->cacheKey());
         if ($cols !== null && count($cols) === $nvars) {
             $this->cols = $cols;
-        } else {
+        } elseif ($this->mode === UrlMode::Full) {
             $m0 = Oracle::render($this->baseUrl, 0, $this->spec->version);
             $i = 0;
             foreach ($this->freeChars as $k) {
@@ -113,6 +150,20 @@ final class Solver
                     $this->cols[$i] = Oracle::render($u, 0, $this->spec->version) ^ $m0;
                     $i++;
                 }
+            }
+            $cache?->set($this->cacheKey(), $this->cols);
+        } else {
+            // Sonde pleine capacité : flipper le bit b du caractère k flippe
+            // exactement le bit header + 8k + b du flux de données, et la
+            // colonne résultante est indépendante du contenu (linéarité).
+            $probe = $this->baseUrl.str_repeat(chr(self::OFFSET), $this->spec->capacity - strlen($this->baseUrl));
+            $m0 = Oracle::render($probe, 0, $this->spec->version);
+            foreach ($this->freeBits as $i => $s) {
+                $k = ($s - $this->spec->headerBits) >> 3;
+                $b = ($s - $this->spec->headerBits) & 7;
+                $u = $probe;
+                $u[$k] = chr(ord($u[$k]) ^ (0x80 >> $b));
+                $this->cols[$i] = Oracle::render($u, 0, $this->spec->version) ^ $m0;
             }
             $cache?->set($this->cacheKey(), $this->cols);
         }
@@ -162,7 +213,10 @@ final class Solver
         }
     }
 
-    /** @return array{0:string,1:string} [modules prédits (packés), URL] pour un masque donné */
+    /**
+     * @return array{0:string,1:string} [modules prédits (packés), URL] pour un masque donné.
+     *                                  En mode Short l'URL ne change pas : la solution vit dans le padding.
+     */
     public function solve(string $targetPacked, int $mask): array
     {
         $cur = Oracle::render($this->baseUrl, $mask, $this->spec->version);
@@ -174,15 +228,17 @@ final class Solver
             }
         }
         $url = $this->baseUrl;
-        $nb = count(self::BASIS);
-        foreach ($this->freeChars as $i => $k) {
-            $v = ord($url[$k]);
-            foreach (self::BASIS as $j => $basis) {
-                if (Bits::get($sol, $i * $nb + $j)) {
-                    $v ^= $basis;
+        if ($this->mode === UrlMode::Full) {
+            $nb = count(self::BASIS);
+            foreach ($this->freeChars as $i => $k) {
+                $v = ord($url[$k]);
+                foreach (self::BASIS as $j => $basis) {
+                    if (Bits::get($sol, $i * $nb + $j)) {
+                        $v ^= $basis;
+                    }
                 }
+                $url[$k] = chr($v);
             }
-            $url[$k] = chr($v);
         }
 
         return [$cur, $url];

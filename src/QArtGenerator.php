@@ -33,6 +33,7 @@ final class QArtGenerator
         private readonly int $maxAttempts = 3,
         private readonly bool $validateDecode = true,
         private readonly int $version = QArtSpec::DEFAULT_VERSION,
+        private readonly UrlMode $urlMode = UrlMode::Full,
     ) {
         $this->random = $random ?? new SystemRandom;
         if ($errorBudgetPerBlock < 0 || $errorBudgetPerBlock > 4) {
@@ -115,7 +116,7 @@ final class QArtGenerator
         usort($prio, fn ($a, $b) => $b[0] <=> $a[0]);
         $order = array_column($prio, 1);
 
-        $solver = new Solver($spec, $this->prefix, $this->random);
+        $solver = new Solver($spec, $this->prefix, $this->random, $this->urlMode);
         $solver->buildGenerator($this->matrixCache);
         $solver->eliminate($order);
 
@@ -166,7 +167,9 @@ final class QArtGenerator
         $best = null;
         for ($mask = 0; $mask < 8; $mask++) {
             [$cur, $url] = $solver->solve($targetPacked, $mask);
-            if (Oracle::render($url, $mask, $spec->version) !== $cur) {
+            // En mode Short la solution vit dans le padding, que l'oracle ne
+            // sait pas reproduire : la validation se fait par décodage final.
+            if ($this->urlMode === UrlMode::Full && Oracle::render($url, $mask, $spec->version) !== $cur) {
                 throw new QArtException("masque $mask : prédiction != rendu réel (mapping incohérent)");
             }
             $score = 0.0;

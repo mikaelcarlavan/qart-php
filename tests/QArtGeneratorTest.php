@@ -10,11 +10,13 @@ use SqrArt\QArt\Cache\FileMatrixCache;
 use SqrArt\QArt\DotShape;
 use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\FinderShape;
+use SqrArt\QArt\ImagePipeline;
 use SqrArt\QArt\QArtGenerator;
 use SqrArt\QArt\QArtSpec;
 use SqrArt\QArt\Random\SeededRandom;
 use SqrArt\QArt\RenderProfile;
 use SqrArt\QArt\Solver;
+use SqrArt\QArt\UrlMode;
 
 /**
  * Test de bout en bout : génération complète sur une image synthétique,
@@ -133,6 +135,77 @@ final class QArtGeneratorTest extends TestCase
         $im->writeImage($raster);
         $decoded = (new QRCode)->readFromFile($raster);
         $this->assertSame($res->url, $decoded->data, 'le SVG rastérisé doit décoder la même URL');
+    }
+
+    /**
+     * LE test du mode padding bits : l'URL décodée doit être courte
+     * (préfixe + série) alors que le padding porte l'image. Prouve que le
+     * décodeur (port ZXing) ignore le contenu du padding non standard.
+     */
+    public function test_short_mode_decodes_to_clean_url(): void
+    {
+        $out = self::$dir.'/qr-short.png';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 1,
+            random: new SeededRandom(42),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            urlMode: UrlMode::Short,
+        );
+        $res = $gen->generate(self::$imagePath, $out);
+
+        // URL courte : préfixe + série de 8, rien d'autre
+        $this->assertSame(strlen(self::PREFIX) + Solver::SERIAL, strlen($res->url));
+        $this->assertSame($res->serial, $res->suffix, 'en mode Short le suffixe est la série');
+        $this->assertMatchesRegularExpression('/^[H-Wh-w]{8}$/', $res->suffix);
+        $this->assertSame(1, $res->attempts, 'le PNG doit décoder du premier coup');
+
+        // décodage indépendant : l'URL lue est exactement la courte
+        $decoded = (new QRCode)->readFromFile($out);
+        $this->assertSame(self::PREFIX.$res->serial, $decoded->data);
+    }
+
+    public function test_short_mode_improves_fidelity_over_full(): void
+    {
+        // même image, même graine : le mode Short (1972 bits libres) doit
+        // faire au moins aussi bien que le mode Full (1235 bits)
+        $score = function (UrlMode $mode): float {
+            $out = self::$dir.'/qr-fid-'.$mode->value.'.png';
+            $gen = new QArtGenerator(
+                prefix: self::PREFIX,
+                errorBudgetPerBlock: 0,
+                random: new SeededRandom(7),
+                matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+                urlMode: $mode,
+            );
+            $gen->generate(self::$imagePath, $out);
+
+            // fidélité mesurée sur les points de données du PNG produit
+            $img = ImagePipeline::fromFile(self::$imagePath);
+            $png = imagecreatefrompng($out);
+            $spec = new QArtSpec;
+            $s = ImagePipeline::S;
+            $scale = 3;
+            $border = 4 * $s;
+            $good = 0.0;
+            for ($r = 0; $r < $spec->n; $r++) {
+                for ($c = 0; $c < $spec->n; $c++) {
+                    if ($spec->fmap[$r][$c]) {
+                        continue;
+                    }
+                    $px = imagecolorat($png, ($c * $s + 3 + $border) * $scale + 1, ($r * $s + 3 + $border) * $scale + 1);
+                    $lum = (0.299 * (($px >> 16) & 0xFF) + 0.587 * (($px >> 8) & 0xFF) + 0.114 * ($px & 0xFF)) / 255;
+                    $bit = $lum < 0.5 ? 1 : 0;
+                    if ($bit === $img->target[$r][$c]) {
+                        $good += $img->conf[$r][$c];
+                    }
+                }
+            }
+
+            return $good;
+        };
+
+        $this->assertGreaterThanOrEqual($score(UrlMode::Full), $score(UrlMode::Short));
     }
 
     public function test_generates_at_version_5(): void

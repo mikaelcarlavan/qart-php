@@ -54,6 +54,28 @@ embarqué dans chillerlan) et l'URL vérifiée. En cas d'échec, régénération
 avec une autre série et un budget d'erreur réduit, puis
 `GenerationFailedException`.
 
+### Mode URL courte (padding bits)
+
+Par défaut, l'URL remplit toute la capacité du QR (`UrlMode::Full`). En
+`UrlMode::Short`, seule l'URL courte (préfixe + série de 8) est encodée avec
+un terminator précoce, et **les octets de padding portent l'image** —
+l'approche du QArt original et de fuqr :
+
+```php
+use SqrArt\QArt\UrlMode;
+
+$gen = new QArtGenerator(prefix: 'https://sqr.art/', urlMode: UrlMode::Short);
+$res = $gen->generate('photo.jpg', 'qr.png');
+$res->url;      // https://sqr.art/UKmohnVJ — 24 caractères, propre au scan
+$res->suffix;   // la série seule (8 caractères) pour le lookup
+```
+
+Doubles gains : URL décodée lisible ET meilleure fidélité (8 bits de liberté
+par octet de padding contre 5 par caractère d'URL — 1972 vs 1235 variables
+en v10 avec ce préfixe). Les décodeurs ignorent le contenu du padding
+(vérifié par décodage réel à chaque génération) ; comme pour le reste,
+valider sur vos appareils cibles avant un grand tirage.
+
 ### Sortie SVG (print-ready)
 
 Passer un 4e argument à `generate()` produit aussi un SVG vectoriel —
