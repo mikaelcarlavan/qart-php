@@ -91,11 +91,31 @@ $res = $gen->generate('photo.jpg', 'qr.png', importance: $importance);
 $res->protectedMismatches;   // 0 = zone garantie ; sinon avertissement
 ```
 
-Coordonnées en fractions (0..1) du carré recadré centré. Plusieurs zones
+Coordonnées en fractions (0..1) du carré recadré. Plusieurs zones
 possibles (`->protect()` chaîné). Si la zone chevauche la région
 structurellement fixe (header/préfixe, bas droite) au-delà de ce que le
 masque et le budget peuvent rattraper, le résultat le dit honnêtement via
 `protectedMismatches` et un avertissement — rien n'est caché.
+
+### Carte d'importance peinte & recadrage
+
+La carte peinte (masque image aligné sur le carré recadré, luminance sur
+fond noir = importance) **pondère** la priorité des modules — un boost
+(×3 au maximum), pas une garantie :
+
+```php
+$importance = (new ImportanceMap)->paint(file_get_contents('mask.png'));
+
+// recadrage libre : carré source en fractions (x, y de l'origine,
+// size en fraction du petit côté) — défaut : carré centré
+$res = $gen->generate('photo.jpg', 'qr.png',
+    importance: $importance,
+    crop: ['x' => 0.15, 'y' => 0.0, 'size' => 0.8],
+);
+```
+
+`paint()` et `protect()` se combinent : garantie dure sur le logo,
+pinceau sur le reste du sujet.
 
 ### Sortie SVG (print-ready)
 

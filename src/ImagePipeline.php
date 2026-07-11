@@ -51,27 +51,34 @@ final class ImagePipeline
     /** @var string[] avertissements non bloquants (upscale, faible contraste…) */
     public array $warnings = [];
 
-    public static function fromFile(string $path, int $modules = 57): self
+    /** @param array{x:float,y:float,size:float}|null $crop carré source en fractions (défaut : centré) */
+    public static function fromFile(string $path, int $modules = 57, ?array $crop = null): self
     {
         $data = @file_get_contents($path);
         if ($data === false) {
             throw new ImageException("image illisible: $path");
         }
 
-        return self::fromString($data, $modules);
+        return self::fromString($data, $modules, $crop);
     }
 
-    public static function fromString(string $data, int $modules = 57): self
+    /** @param array{x:float,y:float,size:float}|null $crop */
+    public static function fromString(string $data, int $modules = 57, ?array $crop = null): self
     {
         $src = @imagecreatefromstring($data);
         if ($src === false) {
             throw new ImageException('format d\'image non reconnu ou fichier corrompu');
         }
 
-        return new self($src, $modules);
+        return new self($src, $modules, $crop);
     }
 
-    public function __construct(GdImage $src, int $modules = 57)
+    /**
+     * @param  array{x:float,y:float,size:float}|null  $crop  carré source :
+     *                                                        x,y en fractions de la largeur/hauteur, size en fraction du
+     *                                                        petit côté. Null = carré centré (comportement historique).
+     */
+    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null)
     {
         $this->n = $modules;
         $this->hi = $modules * self::S;
@@ -79,14 +86,26 @@ final class ImagePipeline
 
         $w = imagesx($src);
         $h = imagesy($src);
-        $side = min($w, $h);
-        if ($side < 1) {
+        if (min($w, $h) < 1) {
             throw new ImageException('image vide');
         }
+
+        // Fenêtre de recadrage (carrée), centrée par défaut
+        if ($crop !== null) {
+            $side = max(8, (int) round($crop['size'] * min($w, $h)));
+            $side = min($side, $w, $h);
+            $sx = max(0, min($w - $side, (int) round($crop['x'] * $w)));
+            $sy = max(0, min($h - $side, (int) round($crop['y'] * $h)));
+        } else {
+            $side = min($w, $h);
+            $sx = intdiv($w - $side, 2);
+            $sy = intdiv($h - $side, 2);
+        }
+
         if ($side < $hi) {
             $this->warnings[] = sprintf(
-                'image %dx%d plus petite que %d px de côté : agrandie, le rendu peut être flou',
-                $w, $h, $hi
+                'zone recadrée %dpx plus petite que %d px de côté : agrandie, le rendu peut être flou',
+                $side, $hi
             );
         }
 
@@ -95,13 +114,9 @@ final class ImagePipeline
         imagefilledrectangle($flat, 0, 0, $w - 1, $h - 1, 0xFFFFFF);
         imagecopy($flat, $src, 0, 0, 0, 0, $w, $h);
 
-        // Recadrage carré centré + redimensionnement à la grille de sous-pixels
+        // Recadrage + redimensionnement à la grille de sous-pixels
         $sq = imagecreatetruecolor($hi, $hi);
-        imagecopyresampled(
-            $sq, $flat, 0, 0,
-            intdiv($w - $side, 2), intdiv($h - $side, 2),
-            $hi, $hi, $side, $side
-        );
+        imagecopyresampled($sq, $flat, 0, 0, $sx, $sy, $hi, $hi, $side, $side);
 
         $gray = [];
         $rgb = [];

@@ -91,6 +91,27 @@ final class ImagePipelineTest extends TestCase
         $this->assertCount(57, $img->target);
     }
 
+    public function test_crop_selects_the_requested_region(): void
+    {
+        // moitié gauche noire, moitié droite blanche
+        $im = imagecreatetruecolor(800, 800);
+        imagefilledrectangle($im, 0, 0, 399, 799, 0x000000);
+        imagefilledrectangle($im, 400, 0, 799, 799, 0xFFFFFF);
+
+        // chaque fenêtre chevauche légèrement la frontière (contraste requis)
+        $left = new ImagePipeline($im, 57, ['x' => 0.08, 'y' => 0.25, 'size' => 0.45]);
+        $right = new ImagePipeline($im, 57, ['x' => 0.47, 'y' => 0.25, 'size' => 0.45]);
+
+        $this->assertSame(1, $left->target[28][28], 'recadrage gauche = noir');
+        $this->assertSame(0, $right->target[28][28], 'recadrage droit = blanc');
+    }
+
+    public function test_crop_is_clamped_to_image_bounds(): void
+    {
+        $img = new ImagePipeline(self::makeTestImage(500), 57, ['x' => 0.9, 'y' => 0.9, 'size' => 0.5]);
+        $this->assertCount(57, $img->target);   // pas d'exception, fenêtre ramenée dans l'image
+    }
+
     public function test_flattens_alpha_on_white(): void
     {
         $im = imagecreatetruecolor(500, 500);

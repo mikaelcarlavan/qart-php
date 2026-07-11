@@ -87,8 +87,10 @@ final class QArtGenerator
      * @param  string|null  $outSvg  chemin de sortie SVG optionnel (vectoriel,
      *                               imprimable à toute taille) — même matrice
      *                               que le PNG, validé via le décodage du PNG
-     * @param  ImportanceMap|null  $importance  zones protégées : leurs modules
-     *                                          consomment les pivots en premier
+     * @param  ImportanceMap|null  $importance  zones protégées (pivots en
+     *                                          premier) et carte peinte (boost)
+     * @param  array{x:float,y:float,size:float}|null  $crop  recadrage carré
+     *                                                        (défaut : centré)
      */
     public function generate(
         string $imagePath,
@@ -96,15 +98,17 @@ final class QArtGenerator
         ?RenderProfile $profile = null,
         ?string $outSvg = null,
         ?ImportanceMap $importance = null,
+        ?array $crop = null,
     ): GenerationResult {
         $profile ??= RenderProfile::screen();
         $spec = new QArtSpec($this->version);
-        $img = ImagePipeline::fromFile($imagePath, $spec->n);
+        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop);
         $n = $spec->n;
         $protected = $importance?->hasZones() ? $importance->moduleMask($spec) : null;
+        $weights = $importance?->hasPaint() ? $importance->moduleWeights($spec) : null;
 
-        // Cible packée + ordre d'importance : zones protégées d'abord,
-        // puis confiance décroissante
+        // Cible packée + ordre d'importance : zones protégées d'abord, puis
+        // confiance pondérée par la carte peinte
         $tp = str_repeat("\0", intdiv($n * $n + 7, 8));
         $prio = [];
         for ($r = 0; $r < $n; $r++) {
@@ -114,7 +118,8 @@ final class QArtGenerator
                     Bits::set($tp, $p, 1);
                 }
                 if (! $spec->fmap[$r][$c]) {
-                    $prio[] = [$protected[$r][$c] ?? false ? 1 : 0, $img->conf[$r][$c], $p];
+                    $boost = 1.0 + ImportanceMap::PAINT_BOOST * ($weights[$r][$c] ?? 0.0);
+                    $prio[] = [$protected[$r][$c] ?? false ? 1 : 0, $img->conf[$r][$c] * $boost, $p];
                 }
             }
         }
@@ -135,7 +140,7 @@ final class QArtGenerator
             $budget = max(0, $this->errorBudgetPerBlock - ($attempt - 1));
 
             [$mask, $url, $cur] = $this->bestMask($solver, $spec, $img, $tp, $protected);
-            $matrix = $this->applyErrorBudget($spec, $img, $cur, $budget, $protected);
+            $matrix = $this->applyErrorBudget($spec, $img, $cur, $budget, $protected, $weights);
 
             Renderer::colorHalftone($img, $spec, $matrix, $outPng, $profile);
 
@@ -231,9 +236,10 @@ final class QArtGenerator
      * sont corrigés en premier.
      *
      * @param  bool[][]|null  $protected  masque des modules protégés
+     * @param  float[][]|null  $weights  carte peinte (0..1)
      * @return int[][] matrice de modules finale
      */
-    private function applyErrorBudget(QArtSpec $spec, ImagePipeline $img, string $cur, int $budget, ?array $protected = null): array
+    private function applyErrorBudget(QArtSpec $spec, ImagePipeline $img, string $cur, int $budget, ?array $protected = null, ?array $weights = null): array
     {
         $n = $spec->n;
         $matrix = [];
@@ -254,7 +260,7 @@ final class QArtGenerator
                     // à confiance quasi nulle (gris ambigus)
                     $g += ($protected[$r][$c] ?? false)
                         ? ImportanceMap::PROTECT_WEIGHT * (1.0 + $img->conf[$r][$c])
-                        : $img->conf[$r][$c];
+                        : $img->conf[$r][$c] * (1.0 + ImportanceMap::PAINT_BOOST * ($weights[$r][$c] ?? 0.0));
                 }
             }
             if ($g > 0) {

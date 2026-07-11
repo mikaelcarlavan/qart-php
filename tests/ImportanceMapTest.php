@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SqrArt\QArt\Tests;
 
 use PHPUnit\Framework\TestCase;
+use SqrArt\QArt\Exception\ImageException;
 use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\ImportanceMap;
 use SqrArt\QArt\QArtSpec;
@@ -41,6 +42,50 @@ final class ImportanceMapTest extends TestCase
         $this->assertTrue($mask[0][0]);
         $this->assertTrue($mask[48][48]);
         $this->assertFalse($mask[28][28]);
+    }
+
+    public function test_painted_mask_maps_to_module_weights(): void
+    {
+        // masque 200x200 : disque blanc en haut à gauche sur fond noir
+        $mask = imagecreatetruecolor(200, 200);
+        imagefilledrectangle($mask, 0, 0, 199, 199, 0x000000);
+        imagefilledellipse($mask, 50, 50, 80, 80, 0xFFFFFF);
+        ob_start();
+        imagepng($mask);
+        $data = ob_get_clean();
+
+        $map = (new ImportanceMap)->paint($data);
+        $this->assertTrue($map->hasPaint());
+        $this->assertFalse($map->hasZones());
+
+        $weights = $map->moduleWeights(new QArtSpec(10));
+        // centre du disque (50/200 = 0.25 -> module 14) : poids fort
+        $this->assertGreaterThan(0.8, $weights[14][14]);
+        // coin opposé : poids nul
+        $this->assertLessThan(0.05, $weights[50][50]);
+    }
+
+    public function test_transparent_mask_regions_weigh_nothing(): void
+    {
+        $mask = imagecreatetruecolor(100, 100);
+        imagesavealpha($mask, true);
+        imagealphablending($mask, false);
+        imagefilledrectangle($mask, 0, 0, 99, 99, imagecolorallocatealpha($mask, 0, 0, 0, 127));
+        imagealphablending($mask, true);
+        imagefilledrectangle($mask, 0, 0, 49, 99, 0xFFFFFF);   // gauche peinte
+        ob_start();
+        imagepng($mask);
+        $data = ob_get_clean();
+
+        $weights = (new ImportanceMap)->paint($data)->moduleWeights(new QArtSpec(10));
+        $this->assertGreaterThan(0.8, $weights[28][10]);
+        $this->assertLessThan(0.05, $weights[28][45]);
+    }
+
+    public function test_rejects_unreadable_paint_mask(): void
+    {
+        $this->expectException(ImageException::class);
+        (new ImportanceMap)->paint('pas une image');
     }
 
     public function test_rejects_out_of_range_zone(): void
