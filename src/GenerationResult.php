@@ -16,5 +16,7 @@ final class GenerationResult
         public readonly int $attempts,
         public readonly array $warnings,
         public readonly ?string $svgPath = null,
+        /** Modules de zones protégées non fidèles à l'image (null si aucune zone). */
+        public readonly ?int $protectedMismatches = null,
     ) {}
 }

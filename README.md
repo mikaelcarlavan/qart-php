@@ -76,6 +76,27 @@ en v10 avec ce préfixe). Les décodeurs ignorent le contenu du padding
 (vérifié par décodage réel à chaque génération) ; comme pour le reste,
 valider sur vos appareils cibles avant un grand tirage.
 
+### Zones protégées
+
+Garantir qu'un logo ou un visage reste fidèle : les modules des zones
+protégées consomment les degrés de liberté en premier (tête de l'ordre de
+pivot), le choix du masque minimise les écarts sur les bits non
+contrôlables, et le budget d'erreur corrige les retardataires en priorité.
+
+```php
+use SqrArt\QArt\ImportanceMap;
+
+$importance = (new ImportanceMap)->protect(x: 0.38, y: 0.18, w: 0.34, h: 0.45);
+$res = $gen->generate('photo.jpg', 'qr.png', importance: $importance);
+$res->protectedMismatches;   // 0 = zone garantie ; sinon avertissement
+```
+
+Coordonnées en fractions (0..1) du carré recadré centré. Plusieurs zones
+possibles (`->protect()` chaîné). Si la zone chevauche la région
+structurellement fixe (header/préfixe, bas droite) au-delà de ce que le
+masque et le budget peuvent rattraper, le résultat le dit honnêtement via
+`protectedMismatches` et un avertissement — rien n'est caché.
+
 ### Sortie SVG (print-ready)
 
 Passer un 4e argument à `generate()` produit aussi un SVG vectoriel —

@@ -11,6 +11,7 @@ use SqrArt\QArt\DotShape;
 use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\FinderShape;
 use SqrArt\QArt\ImagePipeline;
+use SqrArt\QArt\ImportanceMap;
 use SqrArt\QArt\QArtGenerator;
 use SqrArt\QArt\QArtSpec;
 use SqrArt\QArt\Random\SeededRandom;
@@ -206,6 +207,52 @@ final class QArtGeneratorTest extends TestCase
         };
 
         $this->assertGreaterThanOrEqual($score(UrlMode::Full), $score(UrlMode::Short));
+    }
+
+    /**
+     * Zone protégée : tous ses modules de données doivent être fidèles à
+     * l'image dans la matrice finale (pivots prioritaires + budget d'erreur),
+     * et le QR doit toujours décoder.
+     */
+    public function test_protected_zone_is_fully_faithful(): void
+    {
+        $out = self::$dir.'/qr-protected.png';
+        $importance = (new ImportanceMap)->protect(0.35, 0.35, 0.3, 0.3);
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 2,
+            random: new SeededRandom(42),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            urlMode: UrlMode::Short,
+        );
+        $res = $gen->generate(self::$imagePath, $out, importance: $importance);
+
+        $this->assertSame(0, $res->protectedMismatches, 'zone protégée non garantie');
+        $this->assertSame(1, $res->attempts);
+        $this->assertStringNotContainsString('zone protégée', implode(' ', $res->warnings));
+
+        // sans carte : protectedMismatches doit rester null
+        $res2 = $gen->generate(self::$imagePath, self::$dir.'/qr-noprot.png');
+        $this->assertNull($res2->protectedMismatches);
+    }
+
+    public function test_oversized_protected_zone_reports_mismatches(): void
+    {
+        // zone quasi totale : impossible à garantir entièrement, le résultat
+        // doit le dire au lieu de le cacher
+        $out = self::$dir.'/qr-overprotected.png';
+        $importance = (new ImportanceMap)->protect(0.02, 0.02, 0.96, 0.96);
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 1,
+            random: new SeededRandom(9),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+        );
+        $res = $gen->generate(self::$imagePath, $out, importance: $importance);
+
+        $this->assertNotNull($res->protectedMismatches);
+        $this->assertGreaterThan(0, $res->protectedMismatches);
+        $this->assertStringContainsString('zone protégée', implode(' ', $res->warnings));
     }
 
     public function test_generates_at_version_5(): void

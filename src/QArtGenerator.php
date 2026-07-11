@@ -87,19 +87,24 @@ final class QArtGenerator
      * @param  string|null  $outSvg  chemin de sortie SVG optionnel (vectoriel,
      *                               imprimable à toute taille) — même matrice
      *                               que le PNG, validé via le décodage du PNG
+     * @param  ImportanceMap|null  $importance  zones protégées : leurs modules
+     *                                          consomment les pivots en premier
      */
     public function generate(
         string $imagePath,
         string $outPng,
         ?RenderProfile $profile = null,
         ?string $outSvg = null,
+        ?ImportanceMap $importance = null,
     ): GenerationResult {
         $profile ??= RenderProfile::screen();
         $spec = new QArtSpec($this->version);
         $img = ImagePipeline::fromFile($imagePath, $spec->n);
         $n = $spec->n;
+        $protected = $importance?->hasZones() ? $importance->moduleMask($spec) : null;
 
-        // Cible packée + ordre d'importance (confiance décroissante)
+        // Cible packée + ordre d'importance : zones protégées d'abord,
+        // puis confiance décroissante
         $tp = str_repeat("\0", intdiv($n * $n + 7, 8));
         $prio = [];
         for ($r = 0; $r < $n; $r++) {
@@ -109,12 +114,12 @@ final class QArtGenerator
                     Bits::set($tp, $p, 1);
                 }
                 if (! $spec->fmap[$r][$c]) {
-                    $prio[] = [$img->conf[$r][$c], $p];
+                    $prio[] = [$protected[$r][$c] ?? false ? 1 : 0, $img->conf[$r][$c], $p];
                 }
             }
         }
-        usort($prio, fn ($a, $b) => $b[0] <=> $a[0]);
-        $order = array_column($prio, 1);
+        usort($prio, fn ($a, $b) => [$b[0], $b[1]] <=> [$a[0], $a[1]]);
+        $order = array_column($prio, 2);
 
         $solver = new Solver($spec, $this->prefix, $this->random, $this->urlMode);
         $solver->buildGenerator($this->matrixCache);
@@ -129,8 +134,8 @@ final class QArtGenerator
             // de décodage : on réduit le budget à chaque nouvelle tentative.
             $budget = max(0, $this->errorBudgetPerBlock - ($attempt - 1));
 
-            [$mask, $url, $cur] = $this->bestMask($solver, $spec, $img, $tp);
-            $matrix = $this->applyErrorBudget($spec, $img, $cur, $budget);
+            [$mask, $url, $cur] = $this->bestMask($solver, $spec, $img, $tp, $protected);
+            $matrix = $this->applyErrorBudget($spec, $img, $cur, $budget, $protected);
 
             Renderer::colorHalftone($img, $spec, $matrix, $outPng, $profile);
 
@@ -140,6 +145,26 @@ final class QArtGenerator
                 }
                 $plen = strlen($this->prefix);
 
+                $protectedMismatches = null;
+                $warnings = $img->warnings;
+                if ($protected !== null) {
+                    $protectedMismatches = 0;
+                    for ($r = 0; $r < $n; $r++) {
+                        for ($c = 0; $c < $n; $c++) {
+                            if ($protected[$r][$c] && ! $spec->fmap[$r][$c]
+                                && $matrix[$r][$c] !== $img->target[$r][$c]) {
+                                $protectedMismatches++;
+                            }
+                        }
+                    }
+                    if ($protectedMismatches > 0) {
+                        $warnings[] = sprintf(
+                            'zone protégée : %d module(s) non garantis — réduire la zone, augmenter errorBudgetPerBlock ou passer en UrlMode::Short',
+                            $protectedMismatches
+                        );
+                    }
+                }
+
                 return new GenerationResult(
                     url: $url,
                     suffix: substr($url, $plen),
@@ -147,8 +172,9 @@ final class QArtGenerator
                     mask: $mask,
                     pngPath: $outPng,
                     attempts: $attempt,
-                    warnings: $img->warnings,
+                    warnings: $warnings,
                     svgPath: $outSvg,
+                    protectedMismatches: $protectedMismatches,
                 );
             }
         }
@@ -160,8 +186,16 @@ final class QArtGenerator
         ));
     }
 
-    /** @return array{0:int,1:string,2:string} [masque, URL, modules packés] au meilleur score pondéré */
-    private function bestMask(Solver $solver, QArtSpec $spec, ImagePipeline $img, string $targetPacked): array
+    /**
+     * Meilleur masque au score pondéré. Les modules protégés pèsent
+     * PROTECT_WEIGHT : les bits fixes (header, préfixe, série) valant
+     * contenu XOR masque, le choix du masque est le seul levier sur les
+     * modules protégés qui tombent dans la zone non contrôlable.
+     *
+     * @param  bool[][]|null  $protected  masque des modules protégés
+     * @return array{0:int,1:string,2:string} [masque, URL, modules packés]
+     */
+    private function bestMask(Solver $solver, QArtSpec $spec, ImagePipeline $img, string $targetPacked, ?array $protected = null): array
     {
         $n = $spec->n;
         $best = null;
@@ -176,7 +210,9 @@ final class QArtGenerator
             for ($r = 0; $r < $n; $r++) {
                 for ($c = 0; $c < $n; $c++) {
                     if (Bits::get($cur, $r * $n + $c) === $img->target[$r][$c]) {
-                        $score += $img->conf[$r][$c];
+                        $score += ($protected[$r][$c] ?? false)
+                            ? ImportanceMap::PROTECT_WEIGHT * (1.0 + $img->conf[$r][$c])
+                            : $img->conf[$r][$c];
                     }
                 }
             }
@@ -190,11 +226,14 @@ final class QArtGenerator
 
     /**
      * Sacrifie jusqu'à $budget codewords par bloc RS sur les pires erreurs
-     * visibles, en forçant leurs modules à la cible image.
+     * visibles, en forçant leurs modules à la cible image. Les modules de
+     * zones protégées pèsent PROTECT_WEIGHT dans le tri : leurs codewords
+     * sont corrigés en premier.
      *
+     * @param  bool[][]|null  $protected  masque des modules protégés
      * @return int[][] matrice de modules finale
      */
-    private function applyErrorBudget(QArtSpec $spec, ImagePipeline $img, string $cur, int $budget): array
+    private function applyErrorBudget(QArtSpec $spec, ImagePipeline $img, string $cur, int $budget, ?array $protected = null): array
     {
         $n = $spec->n;
         $matrix = [];
@@ -211,7 +250,11 @@ final class QArtGenerator
             $g = 0.0;
             foreach ($pos as [$r, $c]) {
                 if ($matrix[$r][$c] !== $img->target[$r][$c]) {
-                    $g += $img->conf[$r][$c];
+                    // le terme constant garantit aussi les modules protégés
+                    // à confiance quasi nulle (gris ambigus)
+                    $g += ($protected[$r][$c] ?? false)
+                        ? ImportanceMap::PROTECT_WEIGHT * (1.0 + $img->conf[$r][$c])
+                        : $img->conf[$r][$c];
                 }
             }
             if ($g > 0) {
