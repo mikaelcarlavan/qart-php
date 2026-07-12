@@ -92,6 +92,10 @@ final class QArtGenerator
      *                                          premier) et carte peinte (boost)
      * @param  array{x:float,y:float,size:float}|null  $crop  recadrage carré
      *                                                        (défaut : centré)
+     * @param  string|null  $outPdf  chemin de sortie PDF optionnel (vectoriel,
+     *                               page de PdfRenderer::DEFAULT_SIZE_MM de
+     *                               côté — PdfRenderer::toFile pour une autre
+     *                               taille)
      */
     public function generate(
         string $imagePath,
@@ -100,6 +104,7 @@ final class QArtGenerator
         ?string $outSvg = null,
         ?ImportanceMap $importance = null,
         ?array $crop = null,
+        ?string $outPdf = null,
     ): GenerationResult {
         $profile ??= RenderProfile::screen();
         $spec = new QArtSpec($this->version, $this->ecc);
@@ -161,6 +166,9 @@ final class QArtGenerator
                 if ($outSvg !== null) {
                     SvgRenderer::toFile($img, $spec, $matrix, $outSvg, $profile);
                 }
+                if ($outPdf !== null) {
+                    PdfRenderer::toFile($img, $spec, $matrix, $outPdf, $profile);
+                }
                 $plen = strlen($this->prefix);
 
                 $protectedMismatches = null;
@@ -193,6 +201,7 @@ final class QArtGenerator
                     warnings: $warnings,
                     svgPath: $outSvg,
                     protectedMismatches: $protectedMismatches,
+                    pdfPath: $outPdf,
                 );
             }
         }

@@ -338,6 +338,45 @@ final class QArtGeneratorTest extends TestCase
         $this->assertSame(self::PREFIX.$res->serial, $decoded->data);
     }
 
+    public function test_generates_pdf_alongside_png_and_pdf_decodes(): void
+    {
+        $outPng = self::$dir.'/qr-pdf.png';
+        $outPdf = self::$dir.'/qr-pdf.pdf';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 1,
+            random: new SeededRandom(21),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+        );
+        $res = $gen->generate(self::$imagePath, $outPng, null, null, null, null, $outPdf);
+
+        $this->assertSame($outPdf, $res->pdfPath);
+        $this->assertFileExists($outPdf);
+        $pdf = file_get_contents($outPdf);
+        $this->assertStringStartsWith('%PDF-1.4', $pdf);
+        $this->assertStringEndsWith("%%EOF\n", $pdf);
+
+        // rastérisation (Imagick délègue à Ghostscript) puis décodage réel
+        if (! extension_loaded('imagick') || \Imagick::queryFormats('PDF') === []) {
+            $this->markTestIncomplete('Imagick/PDF indisponible : décodage du PDF rastérisé non vérifié');
+        }
+        $im = new \Imagick;
+        $im->setBackgroundColor('white');
+        $im->setResolution(300, 300);
+        try {
+            $im->readImage($outPdf);
+        } catch (\ImagickException) {
+            $this->markTestIncomplete('Ghostscript indisponible : décodage du PDF rastérisé non vérifié');
+        }
+        // aplatir l'alpha : le lecteur GD interprète mal la transparence
+        $im->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
+        $im->setImageFormat('png');
+        $raster = self::$dir.'/qr-pdf-raster.png';
+        $im->writeImage($raster);
+        $decoded = (new QRCode)->readFromFile($raster);
+        $this->assertSame($res->url, $decoded->data);
+    }
+
     public function test_generates_at_version_5(): void
     {
         $out = self::$dir.'/qr-v5.png';

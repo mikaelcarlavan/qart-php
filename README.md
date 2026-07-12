@@ -197,6 +197,22 @@ régulière rétro), `None` (seuillage brut, aplats posterisés). En pixel art
 le choix change la cible que le solveur poursuit ; en halftone il ne
 change que la texture (la cible reste le seuillage du coeur 3x3).
 
+### Export PDF (print-ready)
+
+```php
+use SqrArt\QArt\PdfRenderer;
+
+$gen->generate('photo.jpg', 'qr.png', $profile, 'qr.svg', outPdf: 'qr.pdf');   // 100 mm
+PdfRenderer::toFile($img, $spec, $matrix, 'qr.pdf', $profile, sizeMm: 60.0);   // taille custom
+```
+
+PDF 1.4 vectoriel assemblé sans dépendance (flux FlateDecode), dimensionné
+en millimètres quiet zone comprise (défaut 100 mm, ~40 mm minimum
+recommandé en halftone). Mêmes règles visuelles que le SVG — styles de
+points, finders arrondis, pixel art plein module. Les rectangles mitoyens
+se chevauchent de ~0.02 mm pour neutraliser les coutures d'anti-aliasing
+des visualiseurs. Couleurs RVB (la conversion CMJN reste à l'imprimeur).
+
 ### Profils de rendu
 
 - `RenderProfile::screen()` — luminances douces, affichage écran (défaut) ;
@@ -249,6 +265,7 @@ cache) — c'est du chillerlan, pas accélérable par cette librairie.
                     longueur du préfixe — linéarité du code)
 - `Renderer`      : halftone 7×7 sous-pixels + points 3×3, ou pixel art
                     plein module ; couleur contrainte en luminance
+- `PdfRenderer`   : export PDF vectoriel print-ready (page en mm, sans dépendance)
 - `QArtGenerator` : orchestration, budget d'erreur, validation par décodage
 
 ## Tests

@@ -18,5 +18,6 @@ final class GenerationResult
         public readonly ?string $svgPath = null,
         /** Modules de zones protégées non fidèles à l'image (null si aucune zone). */
         public readonly ?int $protectedMismatches = null,
+        public readonly ?string $pdfPath = null,
     ) {}
 }
