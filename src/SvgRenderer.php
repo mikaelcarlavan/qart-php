@@ -158,6 +158,93 @@ final class SvgRenderer
         return implode("\n", $svg);
     }
 
+    /**
+     * Pixel art plein module : un rect par plage horizontale de modules de
+     * même couleur. Même viewBox que le halftone (module = 7 unités).
+     *
+     * @param  int[][]  $matrix  modules finaux (après budget d'erreur)
+     */
+    public static function pixelArt(
+        ImagePipeline $img,
+        QArtSpec $spec,
+        array $matrix,
+        RenderProfile $profile,
+    ): string {
+        $n = $spec->n;
+        $s = ImagePipeline::S;
+        $border = $profile->borderModules * $s;
+        $size = $n * $s + 2 * $border;
+        $rounded = $profile->finderShape === FinderShape::Rounded;
+        $finderFill = strtolower($profile->finderColor ?? '#000000');
+
+        $svg = [];
+        $svg[] = '<?xml version="1.0" encoding="UTF-8"?>';
+        $svg[] = sprintf(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" shape-rendering="crispEdges">',
+            $size, $size
+        );
+        $svg[] = sprintf('<rect width="%d" height="%d" fill="#ffffff"/>', $size, $size);
+
+        $svg[] = '<g>';
+        for ($r = 0; $r < $n; $r++) {
+            $runColor = null;
+            $runStart = 0;
+            $flush = function (int $end) use (&$runColor, &$runStart, &$svg, $r, $s, $border): void {
+                if ($runColor !== null) {
+                    $svg[] = sprintf(
+                        '<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>',
+                        $border + $runStart * $s, $border + $r * $s, ($end - $runStart) * $s, $s, $runColor
+                    );
+                }
+                $runColor = null;
+            };
+            for ($c = 0; $c < $n; $c++) {
+                $dark = (bool) $matrix[$r][$c];
+                if ($spec->fmap[$r][$c]) {
+                    $inFinder = self::inFinder($r, $c, $n);
+                    if ((! $dark) || ($rounded && $inFinder)) {
+                        $flush($c);
+
+                        continue;
+                    }
+                    // couleur exacte du finder (choix utilisateur, pas de quantification)
+                    $color = $inFinder ? $finderFill : '#000000';
+                } else {
+                    $color = self::hex(Luma::apply(
+                        $img->moduleRgb[$r][$c],
+                        $dark ? $profile->lDotDark : $profile->lDotLight
+                    ));
+                }
+                if ($color !== $runColor) {
+                    $flush($c);
+                    $runColor = $color;
+                    $runStart = $c;
+                }
+            }
+            $flush($n);
+        }
+        $svg[] = '</g>';
+
+        if ($rounded) {
+            foreach ([[0, 0], [0, $n - 7], [$n - 7, 0]] as [$fr, $fc]) {
+                $x = $border + $fc * $s;
+                $y = $border + $fr * $s;
+                $svg[] = sprintf(
+                    '<rect x="%d" y="%d" width="%d" height="%d" rx="%s" fill="%s"/>'
+                    .'<rect x="%d" y="%d" width="%d" height="%d" rx="%s" fill="#ffffff"/>'
+                    .'<rect x="%d" y="%d" width="%d" height="%d" rx="%s" fill="%s"/>',
+                    $x, $y, 7 * $s, 7 * $s, self::num(7 * $s / 3), $finderFill,
+                    $x + $s, $y + $s, 5 * $s, 5 * $s, self::num(5 * $s / 3.75),
+                    $x + 2 * $s, $y + 2 * $s, 3 * $s, 3 * $s, self::num($s), $finderFill
+                );
+            }
+        }
+
+        $svg[] = '</svg>';
+
+        return implode("\n", $svg);
+    }
+
     public static function toFile(
         ImagePipeline $img,
         QArtSpec $spec,
@@ -165,7 +252,10 @@ final class SvgRenderer
         string $out,
         RenderProfile $profile,
     ): void {
-        if (@file_put_contents($out, self::colorHalftone($img, $spec, $matrix, $profile)) === false) {
+        $svg = $profile->mode === RenderMode::Module
+            ? self::pixelArt($img, $spec, $matrix, $profile)
+            : self::colorHalftone($img, $spec, $matrix, $profile);
+        if (@file_put_contents($out, $svg) === false) {
             throw new QArtException("écriture du SVG impossible: $out");
         }
     }

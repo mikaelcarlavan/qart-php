@@ -162,6 +162,24 @@ fidélité halftone ; H est pertinent pour des rendus pleins modules très
 contrastés ou des QR destinés à des supports abîmés. La matrice génératrice
 est cachée par couple (version, ECC).
 
+### Pixel art plein module
+
+```php
+use SqrArt\QArt\{Ecc, RenderMode, RenderProfile};
+
+$gen = new QArtGenerator(prefix: 'https://sqr.art/', ecc: Ecc::H, errorBudgetPerBlock: 8);
+$gen->generate('photo.jpg', 'qr.png', RenderProfile::screen()->withMode(RenderMode::Module));
+```
+
+En `RenderMode::Module`, chaque module est un carré plein teinté par la
+couleur moyenne de l'image : le QR entier **est** l'image, dithérée
+(Atkinson) à la résolution des modules. Pas de texture ni de points — la
+luminance des modules est contrainte par `lDotDark`/`lDotLight`. C'est le
+mode où l'ECC H brille : la capacité perdue ne coûte rien (moins de modules
+à contrôler) et chaque codeword sacrifié force 8 pixels de plus à l'image.
+Les formes de points sont ignorées ; les finders arrondis et la couleur de
+marque s'appliquent. Sorties PNG et SVG (un rect par plage de modules).
+
 ### Profils de rendu
 
 - `RenderProfile::screen()` — luminances douces, affichage écran (défaut) ;
@@ -190,8 +208,8 @@ new QArtGenerator(prefix: 'https://sqr.art/', random: new SeededRandom(42));
                     avec pivots par importance visuelle ; série seedable
 - `Cache/*`       : cache de la matrice génératrice (dépend uniquement de la
                     longueur du préfixe — linéarité du code)
-- `Renderer`      : halftone 7×7 sous-pixels, points 3×3, couleur contrainte
-                    en luminance (teinte libre, luminance imposée)
+- `Renderer`      : halftone 7×7 sous-pixels + points 3×3, ou pixel art
+                    plein module ; couleur contrainte en luminance
 - `QArtGenerator` : orchestration, budget d'erreur, validation par décodage
 
 ## Tests

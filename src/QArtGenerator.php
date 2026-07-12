@@ -112,7 +112,8 @@ final class QArtGenerator
                 $this->errorBudgetPerBlock, $this->version, $this->ecc->value, $maxBudget, $spec->eccPerBlock
             ));
         }
-        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop);
+        $pixelArt = $profile->mode === RenderMode::Module;
+        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop, $pixelArt);
         $n = $spec->n;
         $protected = $importance?->hasZones() ? $importance->moduleMask($spec) : null;
         $weights = $importance?->hasPaint() ? $importance->moduleWeights($spec) : null;
@@ -152,7 +153,9 @@ final class QArtGenerator
             [$mask, $url, $cur] = $this->bestMask($solver, $spec, $img, $tp, $protected);
             $matrix = $this->applyErrorBudget($spec, $img, $cur, $budget, $protected, $weights);
 
-            Renderer::colorHalftone($img, $spec, $matrix, $outPng, $profile);
+            $pixelArt
+                ? Renderer::pixelArt($img, $spec, $matrix, $outPng, $profile)
+                : Renderer::colorHalftone($img, $spec, $matrix, $outPng, $profile);
 
             if (! $this->validateDecode || $this->decodesTo($outPng, $url)) {
                 if ($outSvg !== null) {

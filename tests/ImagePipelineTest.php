@@ -43,6 +43,34 @@ final class ImagePipelineTest extends TestCase
         $this->assertSame([], $img->warnings);
     }
 
+    public function test_module_dither_targets_for_pixel_art(): void
+    {
+        $halftone = new ImagePipeline(self::makeTestImage(500));
+        $pixel = new ImagePipeline(self::makeTestImage(500), 57, null, true);
+
+        $this->assertCount(57, $pixel->target);
+        $this->assertCount(57, $pixel->moduleRgb);
+        $diff = 0;
+        foreach ($pixel->target as $r => $row) {
+            $this->assertCount(57, $row);
+            foreach ($row as $c => $v) {
+                $this->assertContains($v, [0, 1]);
+                $this->assertGreaterThanOrEqual(0.0, $pixel->conf[$r][$c]);
+                $this->assertLessThanOrEqual(1.0, $pixel->conf[$r][$c]);
+                foreach ($pixel->moduleRgb[$r][$c] as $ch) {
+                    $this->assertGreaterThanOrEqual(0.0, $ch);
+                    $this->assertLessThanOrEqual(1.0, $ch);
+                }
+                if ($v !== $halftone->target[$r][$c]) {
+                    $diff++;
+                }
+            }
+        }
+        // le dithering diffuse l'erreur dans les tons moyens : la cible
+        // pixel art doit différer du simple seuillage du coeur 3x3
+        $this->assertGreaterThan(0, $diff, 'dither module identique au seuillage');
+    }
+
     public function test_accepts_jpeg_and_webp_and_png(): void
     {
         $src = self::makeTestImage(450);

@@ -16,6 +16,7 @@ use SqrArt\QArt\ImportanceMap;
 use SqrArt\QArt\QArtGenerator;
 use SqrArt\QArt\QArtSpec;
 use SqrArt\QArt\Random\SeededRandom;
+use SqrArt\QArt\RenderMode;
 use SqrArt\QArt\RenderProfile;
 use SqrArt\QArt\Solver;
 use SqrArt\QArt\UrlMode;
@@ -285,6 +286,35 @@ final class QArtGeneratorTest extends TestCase
         $this->expectException(QArtException::class);
         $this->expectExceptionMessageMatches('/trop élevé/');
         $gen->generate(self::$imagePath, self::$dir.'/qr-overbudget.png');
+    }
+
+    /**
+     * Pixel art plein module : le QR entier est l'image dithérée. ECC H +
+     * gros budget d'erreur (chaque codeword sacrifié force 8 pixels).
+     */
+    public function test_generates_pixel_art_with_high_ecc(): void
+    {
+        $outPng = self::$dir.'/qr-pixel.png';
+        $outSvg = self::$dir.'/qr-pixel.svg';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 8,
+            random: new SeededRandom(11),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            urlMode: UrlMode::Short,
+            ecc: Ecc::H,
+        );
+        $profile = RenderProfile::screen()->withMode(RenderMode::Module);
+        $res = $gen->generate(self::$imagePath, $outPng, $profile, $outSvg);
+
+        $decoded = (new QRCode)->readFromFile($outPng);
+        $this->assertSame(self::PREFIX.$res->serial, $decoded->data);
+
+        $svg = file_get_contents($outSvg);
+        $this->assertNotFalse(@simplexml_load_string($svg), 'SVG mal formé');
+        // plein module : pas de texture sous-pixel ni de points
+        $this->assertStringNotContainsString('height="1"', $svg);
+        $this->assertStringNotContainsString('<circle', $svg);
     }
 
     public function test_generates_at_version_5(): void

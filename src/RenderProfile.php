@@ -30,6 +30,7 @@ final class RenderProfile
         public readonly DotShape $dotShape = DotShape::Square,
         public readonly FinderShape $finderShape = FinderShape::Square,
         public readonly ?string $finderColor = null,
+        public readonly RenderMode $mode = RenderMode::Halftone,
     ) {
         if ($finderColor !== null && self::luminanceOf($finderColor) > self::FINDER_LUMA_MAX) {
             throw new QArtException(sprintf(
@@ -62,6 +63,12 @@ final class RenderProfile
             'print' => self::print(),
             default => throw new QArtException("profil de rendu inconnu: $name"),
         };
+    }
+
+    /** Pixel art plein module : voir RenderMode::Module. */
+    public function withMode(RenderMode $mode): self
+    {
+        return $this->with(['mode' => $mode]);
     }
 
     public function withDotShape(DotShape $shape): self
@@ -99,6 +106,7 @@ final class RenderProfile
             'dotShape' => $this->dotShape,
             'finderShape' => $this->finderShape,
             'finderColor' => $this->finderColor,
+            'mode' => $this->mode,
         ];
 
         return new self(...array_merge($args, $overrides));

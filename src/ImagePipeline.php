@@ -48,37 +48,43 @@ final class ImagePipeline
     /** @var float[][] confiance 0..1 par module */
     public array $conf;
 
+    /** @var float[][][] couleur moyenne [r,g,b] 0..1 par module */
+    public array $moduleRgb;
+
     /** @var string[] avertissements non bloquants (upscale, faible contraste…) */
     public array $warnings = [];
 
     /** @param array{x:float,y:float,size:float}|null $crop carré source en fractions (défaut : centré) */
-    public static function fromFile(string $path, int $modules = 57, ?array $crop = null): self
+    public static function fromFile(string $path, int $modules = 57, ?array $crop = null, bool $moduleDither = false): self
     {
         $data = @file_get_contents($path);
         if ($data === false) {
             throw new ImageException("image illisible: $path");
         }
 
-        return self::fromString($data, $modules, $crop);
+        return self::fromString($data, $modules, $crop, $moduleDither);
     }
 
     /** @param array{x:float,y:float,size:float}|null $crop */
-    public static function fromString(string $data, int $modules = 57, ?array $crop = null): self
+    public static function fromString(string $data, int $modules = 57, ?array $crop = null, bool $moduleDither = false): self
     {
         $src = @imagecreatefromstring($data);
         if ($src === false) {
             throw new ImageException('format d\'image non reconnu ou fichier corrompu');
         }
 
-        return new self($src, $modules, $crop);
+        return new self($src, $modules, $crop, $moduleDither);
     }
 
     /**
      * @param  array{x:float,y:float,size:float}|null  $crop  carré source :
      *                                                        x,y en fractions de la largeur/hauteur, size en fraction du
      *                                                        petit côté. Null = carré centré (comportement historique).
+     * @param  bool  $moduleDither  cible dithérée à la résolution des modules
+     *                              (pixel art plein module) au lieu du seuil
+     *                              sur le coeur 3x3 (halftone)
      */
-    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null)
+    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null, bool $moduleDither = false)
     {
         $this->n = $modules;
         $this->hi = $modules * self::S;
@@ -180,9 +186,58 @@ final class ImagePipeline
         }
         $this->dith = $dith;
 
-        // Cible + confiance par module (coeur 3x3 du module)
+        // Moyennes par module (luminance + couleur), pour le pixel art et
+        // la couleur des modules pleins
         $n = $this->n;
         $s = self::S;
+        $moduleMu = [];
+        for ($r = 0; $r < $n; $r++) {
+            for ($c = 0; $c < $n; $c++) {
+                $sg = 0.0;
+                $sr = 0.0;
+                $sgc = 0.0;
+                $sb = 0.0;
+                for ($y = 0; $y < $s; $y++) {
+                    for ($x = 0; $x < $s; $x++) {
+                        $sg += $gray[$r * $s + $y][$c * $s + $x];
+                        [$pr, $pg, $pb] = $rgb[$r * $s + $y][$c * $s + $x];
+                        $sr += $pr;
+                        $sgc += $pg;
+                        $sb += $pb;
+                    }
+                }
+                $k = $s * $s;
+                $moduleMu[$r][$c] = $sg / $k;
+                $this->moduleRgb[$r][$c] = [$sr / $k, $sgc / $k, $sb / $k];
+            }
+        }
+
+        if ($moduleDither) {
+            // Pixel art : dithering Atkinson à la résolution des modules —
+            // le QR entier est l'image, chaque module est un pixel. La
+            // confiance reste la distance au seuil : les modules ambigus
+            // coûtent moins cher à sacrifier au solveur.
+            $a = $moduleMu;
+            for ($r = 0; $r < $n; $r++) {
+                for ($c = 0; $c < $n; $c++) {
+                    $new = $a[$r][$c] > 0.5 ? 1.0 : 0.0;
+                    $this->target[$r][$c] = 1 - (int) $new;
+                    $this->conf[$r][$c] = abs($moduleMu[$r][$c] - 0.5) * 2;
+                    $err = ($a[$r][$c] - $new) / 8.0;
+                    foreach ($kern as [$dy, $dx]) {
+                        $nr = $r + $dy;
+                        $nc = $c + $dx;
+                        if ($nr < $n && $nc >= 0 && $nc < $n) {
+                            $a[$nr][$nc] += $err;
+                        }
+                    }
+                }
+            }
+
+            return;
+        }
+
+        // Cible + confiance par module (coeur 3x3 du module) — halftone
         $m = intdiv($s, 2);
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {

@@ -10,6 +10,7 @@ use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\FinderShape;
 use SqrArt\QArt\ImagePipeline;
 use SqrArt\QArt\QArtSpec;
+use SqrArt\QArt\RenderMode;
 use SqrArt\QArt\RenderProfile;
 use SqrArt\QArt\SvgRenderer;
 
@@ -71,6 +72,29 @@ final class SvgRendererTest extends TestCase
         // 159k sous-pixels de texture : la fusion par plages doit compresser
         $this->assertLessThan(120_000, $rects, "fusion par plages inefficace: $rects rects");
         $this->assertGreaterThan(1000, $rects);
+    }
+
+    public function test_pixel_art_mode_emits_full_module_rects(): void
+    {
+        $svg = SvgRenderer::pixelArt(
+            self::$img, self::$spec, self::$matrix,
+            RenderProfile::screen()->withMode(RenderMode::Module)
+        );
+
+        $xml = @simplexml_load_string($svg);
+        $this->assertNotFalse($xml, 'SVG mal formé');
+        $expected = (57 + 8) * 7;
+        $this->assertSame("0 0 $expected $expected", (string) $xml['viewBox']);
+
+        // modules pleins (hauteur = 7 unités), pas de texture ni de points
+        $this->assertStringContainsString('height="7"', $svg);
+        $this->assertStringNotContainsString('height="1"', $svg);
+        $this->assertStringNotContainsString('<circle', $svg);
+
+        // fusion par plages : bien moins d'un rect par module
+        $rects = substr_count($svg, '<rect');
+        $this->assertLessThan(57 * 57, $rects, "fusion inefficace: $rects rects");
+        $this->assertGreaterThan(57, $rects);
     }
 
     public function test_dot_shapes(): void

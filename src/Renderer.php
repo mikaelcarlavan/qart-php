@@ -131,6 +131,74 @@ final class Renderer
         }
     }
 
+    /**
+     * Pixel art plein module : chaque module est un carré plein teinté par la
+     * couleur moyenne de l'image (luminance contrainte par lDotDark/lDotLight).
+     * Le QR entier est l'image — pas de texture, pas de points. Mêmes
+     * dimensions de sortie que le halftone (module = S sous-pixels x scale).
+     *
+     * @param  int[][]  $matrix  modules finaux (après budget d'erreur)
+     */
+    public static function pixelArt(
+        ImagePipeline $img,
+        QArtSpec $spec,
+        array $matrix,
+        string $out,
+        RenderProfile $profile,
+    ): void {
+        $n = $spec->n;
+        $s = ImagePipeline::S;
+        $scale = $profile->scale;
+        $border = $profile->borderModules * $s;
+        $size = ($n * $s + 2 * $border) * $scale;
+        $im = imagecreatetruecolor($size, $size);
+        imagefilledrectangle($im, 0, 0, $size, $size, 0xFFFFFF);
+
+        $toInt = fn (array $c): int => ((int) round($c[0] * 255) << 16)
+            | ((int) round($c[1] * 255) << 8)
+            | (int) round($c[2] * 255);
+        $rounded = $profile->finderShape === FinderShape::Rounded;
+        $finderInt = $toInt($profile->finderRgb());
+        $ms = $s * $scale;
+
+        for ($r = 0; $r < $n; $r++) {
+            for ($c = 0; $c < $n; $c++) {
+                $dark = (bool) $matrix[$r][$c];
+                if ($spec->fmap[$r][$c]) {
+                    if ($rounded && self::inFinder($r, $c, $n)) {
+                        continue;   // repeints en formes dédiées plus bas
+                    }
+                    if (! $dark) {
+                        continue;   // fond déjà blanc
+                    }
+                    $fill = self::inFinder($r, $c, $n) ? $finderInt : 0x000000;
+                } else {
+                    $fill = $toInt(Luma::apply(
+                        $img->moduleRgb[$r][$c],
+                        $dark ? $profile->lDotDark : $profile->lDotLight
+                    ));
+                }
+                $px = ($c * $s + $border) * $scale;
+                $py = ($r * $s + $border) * $scale;
+                imagefilledrectangle($im, $px, $py, $px + $ms - 1, $py + $ms - 1, $fill);
+            }
+        }
+
+        if ($rounded) {
+            foreach ([[0, 0], [0, $n - 7], [$n - 7, 0]] as [$fr, $fc]) {
+                $bx = ($fc * $s + $border) * $scale;
+                $by = ($fr * $s + $border) * $scale;
+                self::roundedRect($im, $bx, $by, 7 * $ms, (int) round(7 * $ms / 3), $finderInt);
+                self::roundedRect($im, $bx + $ms, $by + $ms, 5 * $ms, (int) round(5 * $ms / 3.75), 0xFFFFFF);
+                self::roundedRect($im, $bx + 2 * $ms, $by + 2 * $ms, 3 * $ms, $ms, $finderInt);
+            }
+        }
+
+        if (! imagepng($im, $out)) {
+            throw new QArtException("écriture du PNG impossible: $out");
+        }
+    }
+
     private static function inFinder(int $r, int $c, int $n): bool
     {
         return ($r < 7 && $c < 7)
