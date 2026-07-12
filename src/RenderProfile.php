@@ -31,6 +31,7 @@ final class RenderProfile
         public readonly FinderShape $finderShape = FinderShape::Square,
         public readonly ?string $finderColor = null,
         public readonly RenderMode $mode = RenderMode::Halftone,
+        public readonly Dithering $dithering = Dithering::Atkinson,
     ) {
         if ($finderColor !== null && self::luminanceOf($finderColor) > self::FINDER_LUMA_MAX) {
             throw new QArtException(sprintf(
@@ -71,6 +72,12 @@ final class RenderProfile
         return $this->with(['mode' => $mode]);
     }
 
+    /** Algorithme de dithering (texture halftone et cible pixel art). */
+    public function withDithering(Dithering $dithering): self
+    {
+        return $this->with(['dithering' => $dithering]);
+    }
+
     public function withDotShape(DotShape $shape): self
     {
         return $this->with(['dotShape' => $shape]);
@@ -107,6 +114,7 @@ final class RenderProfile
             'finderShape' => $this->finderShape,
             'finderColor' => $this->finderColor,
             'mode' => $this->mode,
+            'dithering' => $this->dithering,
         ];
 
         return new self(...array_merge($args, $overrides));

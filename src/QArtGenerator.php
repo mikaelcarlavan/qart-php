@@ -113,7 +113,7 @@ final class QArtGenerator
             ));
         }
         $pixelArt = $profile->mode === RenderMode::Module;
-        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop, $pixelArt);
+        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop, $pixelArt, $profile->dithering);
         $n = $spec->n;
         $protected = $importance?->hasZones() ? $importance->moduleMask($spec) : null;
         $weights = $importance?->hasPaint() ? $importance->moduleWeights($spec) : null;

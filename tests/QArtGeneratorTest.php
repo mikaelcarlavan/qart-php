@@ -7,6 +7,7 @@ namespace SqrArt\QArt\Tests;
 use chillerlan\QRCode\QRCode;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Cache\FileMatrixCache;
+use SqrArt\QArt\Dithering;
 use SqrArt\QArt\DotShape;
 use SqrArt\QArt\Ecc;
 use SqrArt\QArt\Exception\QArtException;
@@ -315,6 +316,26 @@ final class QArtGeneratorTest extends TestCase
         // plein module : pas de texture sous-pixel ni de points
         $this->assertStringNotContainsString('height="1"', $svg);
         $this->assertStringNotContainsString('<circle', $svg);
+    }
+
+    public function test_generates_pixel_art_with_ordered_dithering(): void
+    {
+        $out = self::$dir.'/qr-pixel-ordered.png';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 8,
+            random: new SeededRandom(13),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            urlMode: UrlMode::Short,
+            ecc: Ecc::H,
+        );
+        $profile = RenderProfile::screen()
+            ->withMode(RenderMode::Module)
+            ->withDithering(Dithering::Ordered);
+        $res = $gen->generate(self::$imagePath, $out, $profile);
+
+        $decoded = (new QRCode)->readFromFile($out);
+        $this->assertSame(self::PREFIX.$res->serial, $decoded->data);
     }
 
     public function test_generates_at_version_5(): void

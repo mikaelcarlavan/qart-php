@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SqrArt\QArt\Tests;
 
 use PHPUnit\Framework\TestCase;
+use SqrArt\QArt\Dithering;
 use SqrArt\QArt\Exception\ImageException;
 use SqrArt\QArt\ImagePipeline;
 
@@ -41,6 +42,31 @@ final class ImagePipelineTest extends TestCase
             }
         }
         $this->assertSame([], $img->warnings);
+    }
+
+    public function test_dithering_algorithms_produce_distinct_textures(): void
+    {
+        $textures = [];
+        $targets = [];
+        foreach (Dithering::cases() as $d) {
+            $img = new ImagePipeline(self::makeTestImage(500), 57, null, false, $d);
+            $textures[$d->value] = $img->dith;
+            $pix = new ImagePipeline(self::makeTestImage(500), 57, null, true, $d);
+            $targets[$d->value] = $pix->target;
+            foreach ($pix->target as $row) {
+                foreach ($row as $v) {
+                    $this->assertContains($v, [0, 1]);
+                }
+            }
+        }
+        // deux à deux distinctes sur le dégradé, texture comme cible pixel art
+        $names = array_keys($textures);
+        foreach ($names as $i => $a) {
+            foreach (array_slice($names, $i + 1) as $b) {
+                $this->assertNotSame($textures[$a], $textures[$b], "textures $a et $b identiques");
+                $this->assertNotSame($targets[$a], $targets[$b], "cibles $a et $b identiques");
+            }
+        }
     }
 
     public function test_module_dither_targets_for_pixel_art(): void

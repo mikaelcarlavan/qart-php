@@ -55,25 +55,25 @@ final class ImagePipeline
     public array $warnings = [];
 
     /** @param array{x:float,y:float,size:float}|null $crop carré source en fractions (défaut : centré) */
-    public static function fromFile(string $path, int $modules = 57, ?array $crop = null, bool $moduleDither = false): self
+    public static function fromFile(string $path, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson): self
     {
         $data = @file_get_contents($path);
         if ($data === false) {
             throw new ImageException("image illisible: $path");
         }
 
-        return self::fromString($data, $modules, $crop, $moduleDither);
+        return self::fromString($data, $modules, $crop, $moduleDither, $dithering);
     }
 
     /** @param array{x:float,y:float,size:float}|null $crop */
-    public static function fromString(string $data, int $modules = 57, ?array $crop = null, bool $moduleDither = false): self
+    public static function fromString(string $data, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson): self
     {
         $src = @imagecreatefromstring($data);
         if ($src === false) {
             throw new ImageException('format d\'image non reconnu ou fichier corrompu');
         }
 
-        return new self($src, $modules, $crop, $moduleDither);
+        return new self($src, $modules, $crop, $moduleDither, $dithering);
     }
 
     /**
@@ -83,8 +83,10 @@ final class ImagePipeline
      * @param  bool  $moduleDither  cible dithérée à la résolution des modules
      *                              (pixel art plein module) au lieu du seuil
      *                              sur le coeur 3x3 (halftone)
+     * @param  Dithering  $dithering  algorithme appliqué à la texture et à la
+     *                                cible pixel art
      */
-    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null, bool $moduleDither = false)
+    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson)
     {
         $this->n = $modules;
         $this->hi = $modules * self::S;
@@ -166,25 +168,8 @@ final class ImagePipeline
         $this->gray = $gray;
         $this->rgb = $rgb;
 
-        // Dithering Atkinson
-        $a = $gray;
-        $dith = [];
-        $kern = [[0, 1], [0, 2], [1, -1], [1, 0], [1, 1], [2, 0]];
-        for ($y = 0; $y < $hi; $y++) {
-            for ($x = 0; $x < $hi; $x++) {
-                $new = $a[$y][$x] > 0.5 ? 1.0 : 0.0;
-                $dith[$y][$x] = 1 - (int) $new;          // 1 = noir
-                $err = ($a[$y][$x] - $new) / 8.0;
-                foreach ($kern as [$dy, $dx]) {
-                    $ny = $y + $dy;
-                    $nx = $x + $dx;
-                    if ($ny < $hi && $nx >= 0 && $nx < $hi) {
-                        $a[$ny][$nx] += $err;
-                    }
-                }
-            }
-        }
-        $this->dith = $dith;
+        // Texture dithérée à la résolution des sous-pixels
+        $this->dith = self::dither($gray, $dithering);
 
         // Moyennes par module (luminance + couleur), pour le pixel art et
         // la couleur des modules pleins
@@ -213,24 +198,14 @@ final class ImagePipeline
         }
 
         if ($moduleDither) {
-            // Pixel art : dithering Atkinson à la résolution des modules —
-            // le QR entier est l'image, chaque module est un pixel. La
-            // confiance reste la distance au seuil : les modules ambigus
-            // coûtent moins cher à sacrifier au solveur.
-            $a = $moduleMu;
+            // Pixel art : dithering à la résolution des modules — le QR
+            // entier est l'image, chaque module est un pixel. La confiance
+            // reste la distance au seuil : les modules ambigus coûtent
+            // moins cher à sacrifier au solveur.
+            $this->target = self::dither($moduleMu, $dithering);
             for ($r = 0; $r < $n; $r++) {
                 for ($c = 0; $c < $n; $c++) {
-                    $new = $a[$r][$c] > 0.5 ? 1.0 : 0.0;
-                    $this->target[$r][$c] = 1 - (int) $new;
                     $this->conf[$r][$c] = abs($moduleMu[$r][$c] - 0.5) * 2;
-                    $err = ($a[$r][$c] - $new) / 8.0;
-                    foreach ($kern as [$dy, $dx]) {
-                        $nr = $r + $dy;
-                        $nc = $c + $dx;
-                        if ($nr < $n && $nc >= 0 && $nc < $n) {
-                            $a[$nr][$nc] += $err;
-                        }
-                    }
                 }
             }
 
@@ -252,5 +227,50 @@ final class ImagePipeline
                 $this->conf[$r][$c] = abs($mu - 0.5) * 2;
             }
         }
+    }
+
+    /**
+     * Binarise une grille carrée de luminances selon l'algorithme choisi.
+     *
+     * @param  float[][]  $lum  luminances 0..1
+     * @return int[][] 1 = noir
+     */
+    private static function dither(array $lum, Dithering $mode): array
+    {
+        $n = count($lum);
+        $out = [];
+        $kernel = $mode->kernel();
+        if ($kernel !== null) {
+            [$kern, $div] = $kernel;
+            $a = $lum;
+            for ($y = 0; $y < $n; $y++) {
+                for ($x = 0; $x < $n; $x++) {
+                    $new = $a[$y][$x] > 0.5 ? 1.0 : 0.0;
+                    $out[$y][$x] = 1 - (int) $new;
+                    $err = ($a[$y][$x] - $new) / $div;
+                    foreach ($kern as [$dy, $dx, $w]) {
+                        $ny = $y + $dy;
+                        $nx = $x + $dx;
+                        if ($ny < $n && $nx >= 0 && $nx < $n) {
+                            $a[$ny][$nx] += $err * $w;
+                        }
+                    }
+                }
+            }
+
+            return $out;
+        }
+
+        // Bayer 8x8 (Ordered) ou seuil fixe (None)
+        for ($y = 0; $y < $n; $y++) {
+            for ($x = 0; $x < $n; $x++) {
+                $t = $mode === Dithering::Ordered
+                    ? (Dithering::BAYER8[$y % 8][$x % 8] + 0.5) / 64.0
+                    : 0.5;
+                $out[$y][$x] = $lum[$y][$x] > $t ? 0 : 1;
+            }
+        }
+
+        return $out;
     }
 }

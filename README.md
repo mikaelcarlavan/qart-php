@@ -180,6 +180,21 @@ mode où l'ECC H brille : la capacité perdue ne coûte rien (moins de modules
 Les formes de points sont ignorées ; les finders arrondis et la couleur de
 marque s'appliquent. Sorties PNG et SVG (un rect par plage de modules).
 
+### Dithering au choix
+
+```php
+use SqrArt\QArt\Dithering;
+
+RenderProfile::screen()->withDithering(Dithering::FloydSteinberg);
+```
+
+Quatre algorithmes, appliqués à la texture halftone comme à la cible pixel
+art : `Atkinson` (doux, défaut historique), `FloydSteinberg` (diffusion
+complète, plus de détail), `Ordered` (matrice de Bayer 8x8, trame
+régulière rétro), `None` (seuillage brut, aplats posterisés). En pixel art
+le choix change la cible que le solveur poursuit ; en halftone il ne
+change que la texture (la cible reste le seuillage du coeur 3x3).
+
 ### Profils de rendu
 
 - `RenderProfile::screen()` — luminances douces, affichage écran (défaut) ;
@@ -203,7 +218,8 @@ new QArtGenerator(prefix: 'https://sqr.art/', random: new SeededRandom(42));
 - `QArtSpec`      : géométrie QR par (version, ECC) : modules de fonction, zigzag, entrelacement
 - `Oracle`        : rendu conforme via chillerlan (version/ECC/masque figés)
 - `ImagePipeline` : GD, formats JPEG/PNG/WebP/GIF, alpha aplati, autocontraste,
-                    dithering Atkinson, cibles/confiance par module
+                    dithering au choix (Atkinson, Floyd-Steinberg, Bayer,
+                    seuil), cibles/confiance par module
 - `Solver`        : matrice génératrice empirique + élimination gaussienne GF(2)
                     avec pivots par importance visuelle ; série seedable
 - `Cache/*`       : cache de la matrice génératrice (dépend uniquement de la
