@@ -6,6 +6,7 @@ namespace SqrArt\QArt;
 
 use SqrArt\QArt\Cache\MatrixCache;
 use SqrArt\QArt\Exception\QArtException;
+use SqrArt\QArt\Native\Gf2;
 use SqrArt\QArt\Random\RandomSource;
 
 /**
@@ -177,11 +178,23 @@ final class Solver
 
     /**
      * Élimination gaussienne, pivots par ordre d'importance décroissante.
+     * Si la librairie native est disponible (voir Native\Gf2), elle prend
+     * le relais — résultat identique octet pour octet, ~100x plus rapide.
      *
      * @param  int[]  $order  positions de modules (r*N+c) triées par importance
+     * @param  bool|null  $native  forcer (true) ou interdire (false) le
+     *                             chemin natif ; null = automatique
      */
-    public function eliminate(array $order): void
+    public function eliminate(array $order, ?bool $native = null): void
     {
+        if ($native ?? Gf2::available()) {
+            if (! Gf2::available()) {
+                throw new QArtException('librairie native indisponible : bâtir native/ (cargo build --release) ou définir QART_GF2_LIB');
+            }
+            $this->pivots = Gf2::eliminate($this->cols, $this->comp, $order);
+
+            return;
+        }
         $nvars = count($this->cols);
         $unused = array_fill(0, $nvars, true);
         $remaining = $nvars;

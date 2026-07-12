@@ -1,9 +1,14 @@
 {
     "name": "sqrart/qart",
-    "description": "Artistic QR codes: the image is encoded into the QR data and Reed-Solomon bits (QArt approach), rendered as a color halftone. Fixed QR version 10, ECC L.",
+    "description": "Artistic QR codes: the image is encoded into the QR data and Reed-Solomon bits (QArt approach), rendered as color halftone or full-module pixel art. QR versions 1-40, ECC L/M/Q/H.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["qrcode", "qart", "halftone", "art"],
+    "keywords": [
+        "qrcode",
+        "qart",
+        "halftone",
+        "art"
+    ],
     "homepage": "https://sqr.art",
     "authors": [
         {
@@ -31,10 +36,14 @@
         }
     },
     "scripts": {
-        "test": "phpunit"
+        "test": "phpunit",
+        "build-native": "cargo build --release --manifest-path native/Cargo.toml"
     },
     "config": {
         "sort-packages": true
     },
-    "minimum-stability": "stable"
+    "minimum-stability": "stable",
+    "suggest": {
+        "ext-ffi": "Élimination GF(2) native (Rust, ~2x sur une génération v20+) : cargo build --release dans native/, ffi.enable=1"
+    }
 }

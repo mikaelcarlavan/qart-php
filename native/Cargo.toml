@@ -1,0 +1,14 @@
+[package]
+name = "qart-gf2"
+version = "0.1.0"
+edition = "2021"
+description = "Élimination gaussienne GF(2) pour sqrart/qart (FFI PHP)"
+license = "MIT"
+
+[lib]
+name = "qart_gf2"
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+codegen-units = 1

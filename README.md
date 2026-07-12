@@ -16,9 +16,11 @@ QArtGenerator::suggestVersion('photo.jpg');                  // heuristique 5|10
 ```
 
 Coût et mémoire croissent vite avec la version : v5 < 1 s, v10 ~1 s (cache
-chaud), v15 ~20 s à froid et ~400 Mo. Au-delà de v20, l'élimination
-gaussienne en PHP pur devient prohibitive (voir la piste FFI/Rust de la
-feuille de route) — la démo se limite à v5/v10/v15.
+chaud), v20 ~1.3 s à chaud (15 s à froid, 450 Mo), v30 ~3 s à chaud
+(~1 min à froid, 800 Mo), v40 ~5 s à chaud (~3 min à froid, 1.2 Go).
+L'accélération native
+(voir plus bas) divise le temps à chaud par ~2 dès v20 — la démo sqr.art
+se limite à v5/v10/v15.
 
 ## Prérequis
 
@@ -213,6 +215,26 @@ use SqrArt\QArt\Random\SeededRandom;
 new QArtGenerator(prefix: 'https://sqr.art/', random: new SeededRandom(42));
 ```
 
+## Accélération native (Rust, optionnelle)
+
+```bash
+composer build-native   # cargo build --release dans native/
+php -d ffi.enable=1 ...
+```
+
+L'élimination gaussienne GF(2) peut être déléguée à une librairie Rust via
+FFI. La détection est automatique (`$QART_GF2_LIB`, sinon
+`native/target/release/`) et le repli PHP pur est transparent ; le
+résultat est **identique octet pour octet** (vérifié par la suite de
+tests). `ffi.enable=1` est requis en CLI/worker (le défaut PHP est
+`preload`).
+
+Chiffres mesurés (Apple Silicon, cache matrice chaud) : l'élimination
+passe de 1.1 s à 0.07 s en v30 (~x16), une génération complète v30 de
+5.0 s à 2.8 s. À froid, le coût dominant reste la sonde de la matrice
+génératrice (~1 min en v30, une fois par couple version/ECC grâce au
+cache) — c'est du chillerlan, pas accélérable par cette librairie.
+
 ## Structure
 
 - `QArtSpec`      : géométrie QR par (version, ECC) : modules de fonction, zigzag, entrelacement
@@ -221,7 +243,8 @@ new QArtGenerator(prefix: 'https://sqr.art/', random: new SeededRandom(42));
                     dithering au choix (Atkinson, Floyd-Steinberg, Bayer,
                     seuil), cibles/confiance par module
 - `Solver`        : matrice génératrice empirique + élimination gaussienne GF(2)
-                    avec pivots par importance visuelle ; série seedable
+                    avec pivots par importance visuelle ; série seedable ;
+                    chemin natif Rust optionnel (Native\Gf2, repli PHP pur)
 - `Cache/*`       : cache de la matrice génératrice (dépend uniquement de la
                     longueur du préfixe — linéarité du code)
 - `Renderer`      : halftone 7×7 sous-pixels + points 3×3, ou pixel art
