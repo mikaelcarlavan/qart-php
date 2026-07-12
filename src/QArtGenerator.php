@@ -34,10 +34,11 @@ final class QArtGenerator
         private readonly bool $validateDecode = true,
         private readonly int $version = QArtSpec::DEFAULT_VERSION,
         private readonly UrlMode $urlMode = UrlMode::Full,
+        private readonly Ecc $ecc = Ecc::L,
     ) {
         $this->random = $random ?? new SystemRandom;
-        if ($errorBudgetPerBlock < 0 || $errorBudgetPerBlock > 4) {
-            throw new QArtException('errorBudgetPerBlock doit être entre 0 et 4');
+        if ($errorBudgetPerBlock < 0) {
+            throw new QArtException('errorBudgetPerBlock doit être >= 0');
         }
         if ($maxAttempts < 1) {
             throw new QArtException('maxAttempts doit être >= 1');
@@ -101,7 +102,16 @@ final class QArtGenerator
         ?array $crop = null,
     ): GenerationResult {
         $profile ??= RenderProfile::screen();
-        $spec = new QArtSpec($this->version);
+        $spec = new QArtSpec($this->version, $this->ecc);
+        // Reed-Solomon corrige au plus eccPerBlock/2 codewords par bloc :
+        // garder de la marge pour les erreurs de lecture réelles
+        $maxBudget = max(0, intdiv($spec->eccPerBlock, 2) - 2);
+        if ($this->errorBudgetPerBlock > $maxBudget) {
+            throw new QArtException(sprintf(
+                'errorBudgetPerBlock %d trop élevé pour v%d-%s (max %d : %d codewords ECC par bloc)',
+                $this->errorBudgetPerBlock, $this->version, $this->ecc->value, $maxBudget, $spec->eccPerBlock
+            ));
+        }
         $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop);
         $n = $spec->n;
         $protected = $importance?->hasZones() ? $importance->moduleMask($spec) : null;
@@ -208,7 +218,7 @@ final class QArtGenerator
             [$cur, $url] = $solver->solve($targetPacked, $mask);
             // En mode Short la solution vit dans le padding, que l'oracle ne
             // sait pas reproduire : la validation se fait par décodage final.
-            if ($this->urlMode === UrlMode::Full && Oracle::render($url, $mask, $spec->version) !== $cur) {
+            if ($this->urlMode === UrlMode::Full && Oracle::render($url, $mask, $spec->version, $spec->ecc) !== $cur) {
                 throw new QArtException("masque $mask : prédiction != rendu réel (mapping incohérent)");
             }
             $score = 0.0;

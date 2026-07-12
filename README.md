@@ -5,7 +5,7 @@ Reed-Solomon du QR (approche QArt), rendue en halftone couleur. L'URL
 décodée = préfixe fixe + identifiant unique (série + solution) pour lookup
 serveur.
 
-**Multi-versions : QR v1 à v40, ECC L.** La version détermine la grille
+**Multi-versions : QR v1 à v40, ECC L/M/Q/H.** La version détermine la grille
 (17 + 4×v modules de côté) et la capacité (v5 : 106 caractères, v10 : 271,
 v40 : 2953). Les tables par version (blocs Reed-Solomon, alignement) sont
 dérivées de chillerlan — la même librairie qui sert d'oracle.
@@ -34,7 +34,7 @@ use SqrArt\QArt\RenderProfile;
 
 $generator = new QArtGenerator(
     prefix: 'https://sqr.art/',
-    errorBudgetPerBlock: 1,                                   // 0-4 codewords sacrifiés par bloc RS
+    errorBudgetPerBlock: 1,                                   // codewords sacrifiés par bloc RS (plafond selon version/ECC)
     matrixCache: new FileMatrixCache('/tmp/qart-cache'),      // ~4 s économisées par génération
     maxAttempts: 3,                                           // retry avec nouvelle série si décodage KO
 );
@@ -146,6 +146,22 @@ La couleur de finder est contrainte en luminance (<= 0.35) : une couleur
 trop claire casserait la détection et est refusée (`QArtException`). Les
 styles s'appliquent aux deux sorties (PNG et SVG).
 
+### Niveaux ECC (L/M/Q/H)
+
+```php
+use SqrArt\QArt\Ecc;
+
+new QArtGenerator(prefix: 'https://sqr.art/', ecc: Ecc::H, errorBudgetPerBlock: 6);
+```
+
+Monter le niveau ECC réduit la capacité de données (v10 : 271 caractères en
+L, 119 en H) — donc les modules contrôlables par le solveur — mais augmente
+d'autant les codewords ECC sacrifiables : le plafond de `errorBudgetPerBlock`
+est `⌊ecc/bloc / 2⌋ - 2` (v10-L : 7, v10-H : 12). En pratique, L maximise la
+fidélité halftone ; H est pertinent pour des rendus pleins modules très
+contrastés ou des QR destinés à des supports abîmés. La matrice génératrice
+est cachée par couple (version, ECC).
+
 ### Profils de rendu
 
 - `RenderProfile::screen()` — luminances douces, affichage écran (défaut) ;
@@ -166,7 +182,7 @@ new QArtGenerator(prefix: 'https://sqr.art/', random: new SeededRandom(42));
 
 ## Structure
 
-- `QArtSpec`      : géométrie QR v10-L (modules de fonction, zigzag, entrelacement)
+- `QArtSpec`      : géométrie QR par (version, ECC) : modules de fonction, zigzag, entrelacement
 - `Oracle`        : rendu conforme via chillerlan (version/ECC/masque figés)
 - `ImagePipeline` : GD, formats JPEG/PNG/WebP/GIF, alpha aplati, autocontraste,
                     dithering Atkinson, cibles/confiance par module
@@ -192,7 +208,6 @@ bout en bout validée par décodage, déterminisme et cache.
 
 ## Limites connues
 
-- ECC figé à L. Multi-ECC (M/Q/H) : voir la feuille de route v2.
 - La zone préfixe/header (bas droite) reste structurellement non contrôlable.
 - Taille physique minimale d'impression recommandée : ~4×4 cm à 300 dpi
   (le halftone exige ~3× plus de résolution qu'un QR standard).

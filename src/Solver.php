@@ -124,8 +124,8 @@ final class Solver
     public function cacheKey(): string
     {
         return sprintf(
-            'qart-v%dL-%s-p%d-s%d-b%s',
-            $this->spec->version, $this->mode->value, strlen($this->prefix), self::SERIAL,
+            'qart-v%d%s-%s-p%d-s%d-b%s',
+            $this->spec->version, $this->spec->ecc->value, $this->mode->value, strlen($this->prefix), self::SERIAL,
             dechex(array_sum(self::BASIS))
         );
     }
@@ -141,13 +141,13 @@ final class Solver
         if ($cols !== null && count($cols) === $nvars) {
             $this->cols = $cols;
         } elseif ($this->mode === UrlMode::Full) {
-            $m0 = Oracle::render($this->baseUrl, 0, $this->spec->version);
+            $m0 = Oracle::render($this->baseUrl, 0, $this->spec->version, $this->spec->ecc);
             $i = 0;
             foreach ($this->freeChars as $k) {
                 foreach (self::BASIS as $v) {
                     $u = $this->baseUrl;
                     $u[$k] = chr(ord($u[$k]) ^ $v);
-                    $this->cols[$i] = Oracle::render($u, 0, $this->spec->version) ^ $m0;
+                    $this->cols[$i] = Oracle::render($u, 0, $this->spec->version, $this->spec->ecc) ^ $m0;
                     $i++;
                 }
             }
@@ -157,13 +157,13 @@ final class Solver
             // exactement le bit header + 8k + b du flux de données, et la
             // colonne résultante est indépendante du contenu (linéarité).
             $probe = $this->baseUrl.str_repeat(chr(self::OFFSET), $this->spec->capacity - strlen($this->baseUrl));
-            $m0 = Oracle::render($probe, 0, $this->spec->version);
+            $m0 = Oracle::render($probe, 0, $this->spec->version, $this->spec->ecc);
             foreach ($this->freeBits as $i => $s) {
                 $k = ($s - $this->spec->headerBits) >> 3;
                 $b = ($s - $this->spec->headerBits) & 7;
                 $u = $probe;
                 $u[$k] = chr(ord($u[$k]) ^ (0x80 >> $b));
-                $this->cols[$i] = Oracle::render($u, 0, $this->spec->version) ^ $m0;
+                $this->cols[$i] = Oracle::render($u, 0, $this->spec->version, $this->spec->ecc) ^ $m0;
             }
             $cache?->set($this->cacheKey(), $this->cols);
         }
@@ -219,7 +219,7 @@ final class Solver
      */
     public function solve(string $targetPacked, int $mask): array
     {
-        $cur = Oracle::render($this->baseUrl, $mask, $this->spec->version);
+        $cur = Oracle::render($this->baseUrl, $mask, $this->spec->version, $this->spec->ecc);
         $sol = str_repeat("\0", strlen($this->comp[0]));
         foreach ($this->pivots as [$pos, $piv]) {
             if (Bits::get($cur, $pos) !== Bits::get($targetPacked, $pos)) {

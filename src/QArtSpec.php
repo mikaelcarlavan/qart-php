@@ -9,9 +9,9 @@ use chillerlan\QRCode\Common\Version;
 use SqrArt\QArt\Exception\QArtException;
 
 /**
- * Géométrie QR pour une version donnée (1..40), ECC L : modules de fonction,
- * ordre zigzag des modules de données, entrelacement des codewords,
- * capacité en mode byte à pleine charge.
+ * Géométrie QR pour une version (1..40) et un niveau ECC donnés : modules
+ * de fonction, ordre zigzag des modules de données, entrelacement des
+ * codewords, capacité en mode byte à pleine charge.
  *
  * Les tables par version (structure de blocs Reed-Solomon, centres des
  * motifs d'alignement) sont dérivées de chillerlan — la même librairie qui
@@ -22,6 +22,8 @@ final class QArtSpec
     public const DEFAULT_VERSION = 10;
 
     public readonly int $version;
+
+    public readonly Ecc $ecc;
 
     /** Côté de la matrice en modules (17 + 4 * version). */
     public readonly int $n;
@@ -53,16 +55,17 @@ final class QArtSpec
 
     private int $minBlockSize;
 
-    public function __construct(int $version = self::DEFAULT_VERSION)
+    public function __construct(int $version = self::DEFAULT_VERSION, Ecc $ecc = Ecc::L)
     {
         if ($version < 1 || $version > 40) {
             throw new QArtException("version QR invalide: $version (1..40)");
         }
         $this->version = $version;
+        $this->ecc = $ecc;
 
         $meta = new Version($version);
         $this->n = $meta->getDimension();
-        [$eccPerBlock, $groups] = $meta->getRSBlocks(new EccLevel(EccLevel::L));
+        [$eccPerBlock, $groups] = $meta->getRSBlocks(new EccLevel($ecc->level()));
         $this->eccPerBlock = $eccPerBlock;
         $sizes = [];
         foreach ($groups as [$count, $size]) {

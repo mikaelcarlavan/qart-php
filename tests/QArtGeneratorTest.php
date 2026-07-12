@@ -8,6 +8,7 @@ use chillerlan\QRCode\QRCode;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Cache\FileMatrixCache;
 use SqrArt\QArt\DotShape;
+use SqrArt\QArt\Ecc;
 use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\FinderShape;
 use SqrArt\QArt\ImagePipeline;
@@ -253,6 +254,37 @@ final class QArtGeneratorTest extends TestCase
         $this->assertNotNull($res->protectedMismatches);
         $this->assertGreaterThan(0, $res->protectedMismatches);
         $this->assertStringContainsString('zone protégée', implode(' ', $res->warnings));
+    }
+
+    /**
+     * ECC H : capacité réduite mais budget d'erreur quadruplé. La génération
+     * complète doit décoder, avec un budget bien au-delà du plafond de L.
+     */
+    public function test_generates_with_high_ecc_and_larger_error_budget(): void
+    {
+        $out = self::$dir.'/qr-ecc-h.png';
+        $gen = new QArtGenerator(
+            prefix: self::PREFIX,
+            errorBudgetPerBlock: 6,   // impossible en L (max 7 pour 18 ecc/bloc, mais 4 était le cap historique)
+            random: new SeededRandom(42),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            urlMode: UrlMode::Short,
+            ecc: Ecc::H,
+        );
+        $res = $gen->generate(self::$imagePath, $out);
+
+        $this->assertSame(1, $res->attempts, 'le QR ECC H doit décoder du premier coup');
+        $decoded = (new QRCode)->readFromFile($out);
+        $this->assertSame(self::PREFIX.$res->serial, $decoded->data);
+    }
+
+    public function test_rejects_error_budget_beyond_rs_capacity(): void
+    {
+        // v10-L : 18 codewords ECC/bloc => max autorisé 7
+        $gen = new QArtGenerator(prefix: self::PREFIX, errorBudgetPerBlock: 8);
+        $this->expectException(QArtException::class);
+        $this->expectExceptionMessageMatches('/trop élevé/');
+        $gen->generate(self::$imagePath, self::$dir.'/qr-overbudget.png');
     }
 
     public function test_generates_at_version_5(): void

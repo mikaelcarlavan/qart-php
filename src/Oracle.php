@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace SqrArt\QArt;
 
-use chillerlan\QRCode\Common\EccLevel;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
 
@@ -15,11 +14,11 @@ use chillerlan\QRCode\QROptions;
 final class Oracle
 {
     /** Rend l'URL en matrice de bits packée (n*n bits, MSB d'abord). */
-    public static function render(string $url, int $mask, int $version = QArtSpec::DEFAULT_VERSION): string
+    public static function render(string $url, int $mask, int $version = QArtSpec::DEFAULT_VERSION, Ecc $ecc = Ecc::L): string
     {
         $qr = new QRCode(new QROptions([
             'version' => $version,
-            'eccLevel' => EccLevel::L,
+            'eccLevel' => $ecc->level(),
             'maskPattern' => $mask,
             'addQuietzone' => false,
         ]));

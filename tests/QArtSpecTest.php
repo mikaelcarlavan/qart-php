@@ -7,6 +7,7 @@ namespace SqrArt\QArt\Tests;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Bits;
+use SqrArt\QArt\Ecc;
 use SqrArt\QArt\Exception\QArtException;
 use SqrArt\QArt\Oracle;
 use SqrArt\QArt\QArtSpec;
@@ -113,6 +114,61 @@ final class QArtSpecTest extends TestCase
             }
             $this->assertSame(0, $bad, "v$version masque $mask : $bad erreurs de mapping");
         }
+    }
+
+    /** @return array<string, array{0:int,1:Ecc}> combinaisons couvrant les 4 niveaux */
+    public static function eccLevels(): array
+    {
+        return [
+            'v10 M' => [10, Ecc::M],
+            'v10 Q' => [10, Ecc::Q],
+            'v10 H' => [10, Ecc::H],
+            'v5 H (header 8b)' => [5, Ecc::H],
+            'v14 M (remainder 3)' => [14, Ecc::M],
+        ];
+    }
+
+    #[DataProvider('eccLevels')]
+    public function test_char_coords_match_oracle_for_all_ecc_levels(int $version, Ecc $ecc): void
+    {
+        $spec = new QArtSpec($version, $ecc);
+        $alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+        $rng = new SeededRandom($version * 100 + ord($ecc->value));
+        $url = 'https://sqr.art/';
+        for ($i = strlen($url); $i < $spec->capacity; $i++) {
+            $url .= $alpha[$rng->int(0, 63)];
+        }
+
+        $n = $spec->n;
+        foreach (range(0, 7) as $mask) {
+            $m = Oracle::render($url, $mask, $version, $ecc);
+            $bad = 0;
+            for ($k = 0; $k < $spec->capacity; $k++) {
+                $v = ord($url[$k]);
+                $coords = $spec->charCoords($k);
+                for ($b = 0; $b < 8; $b++) {
+                    [$r, $c] = $coords[$b];
+                    $bit = ($v >> (7 - $b)) & 1;
+                    $expected = $bit ^ (self::maskAt($mask, $r, $c) ? 1 : 0);
+                    if (Bits::get($m, $r * $n + $c) !== $expected) {
+                        $bad++;
+                    }
+                }
+            }
+            $this->assertSame(0, $bad, "v$version-{$ecc->value} masque $mask : $bad erreurs de mapping");
+        }
+    }
+
+    public function test_capacity_shrinks_with_ecc_level(): void
+    {
+        $caps = array_map(fn (Ecc $e) => (new QArtSpec(10, $e))->capacity, [Ecc::L, Ecc::M, Ecc::Q, Ecc::H]);
+        $this->assertSame(271, $caps[0]);
+        // capacité strictement décroissante, budget ECC croissant
+        $this->assertTrue($caps[0] > $caps[1] && $caps[1] > $caps[2] && $caps[2] > $caps[3], json_encode($caps));
+        $this->assertGreaterThan(
+            (new QArtSpec(10, Ecc::L))->eccPerBlock,
+            (new QArtSpec(10, Ecc::H))->eccPerBlock
+        );
     }
 
     public function test_rejects_invalid_versions(): void
