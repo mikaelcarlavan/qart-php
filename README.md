@@ -99,6 +99,18 @@ structurellement fixe (header/préfixe, bas droite) au-delà de ce que le
 masque et le budget peuvent rattraper, le résultat le dit honnêtement via
 `protectedMismatches` et un avertissement — rien n'est caché.
 
+### Images non carrées (Fit)
+
+```php
+use SqrArt\QArt\Fit;
+
+$gen->generate('logo-large.png', 'qr.png', fit: Fit::Contain);
+```
+
+`Fit::Cover` (défaut) recadre au carré (fenêtre `crop` ou centrée).
+`Fit::Contain` garde toute l'image, centrée sur un carré blanc qui se
+fond dans la quiet zone — adapté aux logos larges ou hauts.
+
 ### Carte d'importance peinte & recadrage
 
 La carte peinte (masque image aligné sur le carré recadré, luminance sur

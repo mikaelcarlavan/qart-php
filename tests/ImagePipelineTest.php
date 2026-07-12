@@ -7,6 +7,7 @@ namespace SqrArt\QArt\Tests;
 use PHPUnit\Framework\TestCase;
 use SqrArt\QArt\Dithering;
 use SqrArt\QArt\Exception\ImageException;
+use SqrArt\QArt\Fit;
 use SqrArt\QArt\ImagePipeline;
 
 final class ImagePipelineTest extends TestCase
@@ -143,6 +144,26 @@ final class ImagePipelineTest extends TestCase
         $this->assertNotEmpty($img->warnings);
         $this->assertStringContainsString('agrandie', implode(' ', $img->warnings));
         $this->assertCount(57, $img->target);
+    }
+
+    public function test_contain_keeps_the_whole_image_on_white(): void
+    {
+        // image large 2:1, moitié gauche sombre, moitié droite rouge
+        $im = imagecreatetruecolor(800, 400);
+        imagefilledrectangle($im, 0, 0, 399, 399, 0x101010);
+        imagefilledrectangle($im, 400, 0, 799, 399, 0xC03020);
+
+        $cover = new ImagePipeline($im, 57);
+        $contain = new ImagePipeline($im, 57, null, false, Dithering::Atkinson, Fit::Contain);
+
+        // en Contain : bandes blanches en haut et en bas, contenu au centre
+        $this->assertGreaterThan(0.95, $contain->rgb[2][199][0], 'haut non blanc');
+        $this->assertGreaterThan(0.95, $contain->rgb[396][199][0], 'bas non blanc');
+        // les deux moitiés sont présentes (le cover, lui, aurait tout le rouge à droite du centre)
+        $this->assertLessThan(0.3, $contain->gray[199][80], 'moitié sombre absente');
+        $this->assertGreaterThan(0.3, $contain->rgb[199][330][0], 'moitié rouge absente');
+        // et le cover recadre bien (pas de blanc en haut)
+        $this->assertLessThan(0.95, $cover->rgb[2][199][0]);
     }
 
     public function test_crop_selects_the_requested_region(): void

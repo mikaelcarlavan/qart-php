@@ -55,25 +55,25 @@ final class ImagePipeline
     public array $warnings = [];
 
     /** @param array{x:float,y:float,size:float}|null $crop carré source en fractions (défaut : centré) */
-    public static function fromFile(string $path, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson): self
+    public static function fromFile(string $path, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson, Fit $fit = Fit::Cover): self
     {
         $data = @file_get_contents($path);
         if ($data === false) {
             throw new ImageException("image illisible: $path");
         }
 
-        return self::fromString($data, $modules, $crop, $moduleDither, $dithering);
+        return self::fromString($data, $modules, $crop, $moduleDither, $dithering, $fit);
     }
 
     /** @param array{x:float,y:float,size:float}|null $crop */
-    public static function fromString(string $data, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson): self
+    public static function fromString(string $data, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson, Fit $fit = Fit::Cover): self
     {
         $src = @imagecreatefromstring($data);
         if ($src === false) {
             throw new ImageException('format d\'image non reconnu ou fichier corrompu');
         }
 
-        return new self($src, $modules, $crop, $moduleDither, $dithering);
+        return new self($src, $modules, $crop, $moduleDither, $dithering, $fit);
     }
 
     /**
@@ -85,8 +85,10 @@ final class ImagePipeline
      *                              sur le coeur 3x3 (halftone)
      * @param  Dithering  $dithering  algorithme appliqué à la texture et à la
      *                                cible pixel art
+     * @param  Fit  $fit  images non carrées : Cover recadre (défaut),
+     *                    Contain garde tout et complète en blanc
      */
-    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson)
+    public function __construct(GdImage $src, int $modules = 57, ?array $crop = null, bool $moduleDither = false, Dithering $dithering = Dithering::Atkinson, Fit $fit = Fit::Cover)
     {
         $this->n = $modules;
         $this->hi = $modules * self::S;
@@ -96,6 +98,18 @@ final class ImagePipeline
         $h = imagesy($src);
         if (min($w, $h) < 1) {
             throw new ImageException('image vide');
+        }
+
+        if ($fit === Fit::Contain && $w !== $h) {
+            // toute l'image, centrée sur un carré blanc : le blanc se fond
+            // dans la quiet zone du QR
+            $side = max($w, $h);
+            $square = imagecreatetruecolor($side, $side);
+            imagefilledrectangle($square, 0, 0, $side - 1, $side - 1, 0xFFFFFF);
+            imagecopy($square, $src, intdiv($side - $w, 2), intdiv($side - $h, 2), 0, 0, $w, $h);
+            $src = $square;
+            $w = $h = $side;
+            $crop = null;   // le recadrage n'a plus de sens : tout est gardé
         }
 
         // Fenêtre de recadrage (carrée), centrée par défaut

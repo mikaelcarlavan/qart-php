@@ -92,6 +92,8 @@ final class QArtGenerator
      *                                          premier) et carte peinte (boost)
      * @param  array{x:float,y:float,size:float}|null  $crop  recadrage carré
      *                                                        (défaut : centré)
+     * @param  Fit  $fit  images non carrées : recadrer (Cover, défaut) ou
+     *                    tout garder sur fond blanc (Contain)
      * @param  string|null  $outPdf  chemin de sortie PDF optionnel (vectoriel,
      *                               page de PdfRenderer::DEFAULT_SIZE_MM de
      *                               côté — PdfRenderer::toFile pour une autre
@@ -105,6 +107,7 @@ final class QArtGenerator
         ?ImportanceMap $importance = null,
         ?array $crop = null,
         ?string $outPdf = null,
+        Fit $fit = Fit::Cover,
     ): GenerationResult {
         $profile ??= RenderProfile::screen();
         $spec = new QArtSpec($this->version, $this->ecc);
@@ -118,7 +121,7 @@ final class QArtGenerator
             ));
         }
         $pixelArt = $profile->mode === RenderMode::Module;
-        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop, $pixelArt, $profile->dithering);
+        $img = ImagePipeline::fromFile($imagePath, $spec->n, $crop, $pixelArt, $profile->dithering, $fit);
         $n = $spec->n;
         $protected = $importance?->hasZones() ? $importance->moduleMask($spec) : null;
         $weights = $importance?->hasPaint() ? $importance->moduleWeights($spec) : null;
