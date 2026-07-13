@@ -377,6 +377,37 @@ final class QArtGeneratorTest extends TestCase
         $this->assertSame($res->url, $decoded->data);
     }
 
+    /**
+     * Payload statique (série 0) : le contenu exact — espaces, UTF-8,
+     * ponctuation WiFi — doit ressortir du décodeur, octet pour octet.
+     */
+    public function test_generates_static_wifi_payload(): void
+    {
+        $payload = 'WIFI:T:WPA;S:Café de la Plage;P:mot de passe 2026!;H:false;;';
+        $out = self::$dir.'/qr-wifi.png';
+        $gen = new QArtGenerator(
+            prefix: $payload,
+            errorBudgetPerBlock: 1,
+            random: new SeededRandom(17),
+            matrixCache: new FileMatrixCache(self::$dir.'/cache'),
+            urlMode: UrlMode::Short,
+            serialLength: 0,
+        );
+        $res = $gen->generate(self::$imagePath, $out);
+
+        $this->assertSame($payload, $res->url);
+        $this->assertSame('', $res->suffix);
+        $this->assertSame('', $res->serial);
+        $decoded = (new QRCode)->readFromFile($out);
+        $this->assertSame($payload, $decoded->data);
+    }
+
+    public function test_static_payload_requires_short_mode(): void
+    {
+        $this->expectException(QArtException::class);
+        new Solver(new QArtSpec(10), 'WIFI:T:WPA;S:x;P:y;;', new SeededRandom(1), UrlMode::Full, 0);
+    }
+
     public function test_generates_at_version_5(): void
     {
         $out = self::$dir.'/qr-v5.png';

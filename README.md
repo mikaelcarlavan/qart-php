@@ -232,6 +232,30 @@ des visualiseurs. Couleurs RVB (la conversion CMJN reste à l'imprimeur).
   l'impression CMJN écrase les nuances. **À recalibrer sur matrice de tests
   terrain** (Phase 2 du plan) avant un tirage sérieux.
 
+### Payloads statiques (WiFi, vCard, EPC…)
+
+Avec `serialLength: 0` (mode `Short` uniquement), le contenu encodé est
+exactement le préfixe fourni — aucune série aléatoire n'est ajoutée. Tous
+les octets sont acceptés (espaces, UTF-8, retours ligne) : idéal pour les
+payloads standards scannés hors ligne.
+
+```php
+use SqrArt\QArt\UrlMode;
+
+$gen = new QArtGenerator(
+    prefix: 'WIFI:T:WPA;S:Café de la Plage;P:mot de passe;;',
+    urlMode: UrlMode::Short,
+    serialLength: 0,
+);
+$res = $gen->generate('photo.jpg', 'qr.png', $profile);
+// $res->url === le payload, $res->suffix === '' (rien à résoudre côté serveur)
+```
+
+L'image vit dans les octets de padding après le terminator. La matrice de
+sonde est partagée entre toutes les longueurs de payload d'une même
+(version, ECC) — la première génération d'une version chauffe le cache pour
+tous les payloads.
+
 ### Tests reproductibles
 
 Le générateur aléatoire est injectable : avec `SeededRandom`, la sortie est

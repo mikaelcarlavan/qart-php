@@ -57,15 +57,24 @@ final class Solver
         private readonly string $prefix,
         private readonly RandomSource $random,
         private readonly UrlMode $mode = UrlMode::Full,
+        public readonly int $serialLength = self::SERIAL,
     ) {
+        if ($serialLength < 0 || $serialLength > 16) {
+            throw new QArtException("longueur de série invalide: $serialLength (0..16)");
+        }
+        if ($serialLength === 0 && $mode !== UrlMode::Short) {
+            throw new QArtException('payload statique (série 0) : uniquement en UrlMode::Short');
+        }
         $plen = strlen($prefix);
-        if ($plen < 1 || $plen + self::SERIAL >= $spec->capacity) {
+        if ($plen < 1 || $plen + $serialLength >= $spec->capacity) {
             throw new QArtException(sprintf(
                 'préfixe invalide : %d caractères, maximum %d pour la version %d (série de %d comprise)',
-                $plen, $spec->capacity - self::SERIAL - 1, $spec->version, self::SERIAL
+                $plen, $spec->capacity - $serialLength - 1, $spec->version, $serialLength
             ));
         }
-        if (preg_match('/[^\x21-\x7E]/', $prefix)) {
+        // payload statique : contenu libre (WiFi, vCard, EPC — espaces et
+        // retours ligne compris) ; sinon la règle URL historique
+        if ($serialLength > 0 && preg_match('/[^\x21-\x7E]/', $prefix)) {
             throw new QArtException('le préfixe doit être en ASCII imprimable sans espace');
         }
 
@@ -83,10 +92,10 @@ final class Solver
                 $chars[] = chr(self::OFFSET);
             }
             $this->baseUrl = implode('', $chars);
-            $this->freeChars = range($plen + self::SERIAL, $spec->capacity - 1);
+            $this->freeChars = range($plen + $serialLength, $spec->capacity - 1);
         } else {
-            $this->baseUrl = $prefix.str_repeat(chr(self::OFFSET), self::SERIAL);
-            $start = self::firstFreeBit($spec, $plen);
+            $this->baseUrl = $prefix.str_repeat(chr(self::OFFSET), $serialLength);
+            $start = self::firstFreeBit($spec, $plen, $serialLength);
             // les bits au-delà de header + 8*capacité sont hors de portée des
             // sondes pleine capacité (zone terminator) : on s'arrête avant
             $end = $spec->headerBits + 8 * $spec->capacity;
@@ -102,11 +111,23 @@ final class Solver
     }
 
     /** Premier bit de padding libre : après contenu + terminator, aligné à l'octet. */
-    public static function firstFreeBit(QArtSpec $spec, int $prefixLen): int
+    public static function firstFreeBit(QArtSpec $spec, int $prefixLen, int $serialLength = self::SERIAL): int
     {
-        $contentEnd = $spec->headerBits + 8 * ($prefixLen + self::SERIAL) + 4;   // + terminator
+        $contentEnd = $spec->headerBits + 8 * ($prefixLen + $serialLength) + 4;   // + terminator
 
         return intdiv($contentEnd + 7, 8) * 8;
+    }
+
+    /**
+     * Mode Short : par linéarité, la colonne d'un bit du flux de données ne
+     * dépend PAS de la longueur du préfixe — une seule sonde par
+     * (version, ECC) couvre toutes les longueurs de payload (clé partagée),
+     * chaque instance découpe sa plage. Décisif pour les payloads statiques
+     * (WiFi…) dont la longueur varie par utilisateur.
+     */
+    private function sharedShortKey(): string
+    {
+        return sprintf('qart-shortbits-v%d%s-b%s', $this->spec->version, $this->spec->ecc->value, dechex(array_sum(self::BASIS)));
     }
 
     /**
@@ -116,7 +137,7 @@ final class Solver
     public function reseedSerial(): void
     {
         $plen = strlen($this->prefix);
-        for ($i = 0; $i < self::SERIAL; $i++) {
+        for ($i = 0; $i < $this->serialLength; $i++) {
             $this->baseUrl[$plen + $i] = chr($this->coset[$this->random->int(0, 31)]);
         }
     }
@@ -126,7 +147,7 @@ final class Solver
     {
         return sprintf(
             'qart-v%d%s-%s-p%d-s%d-b%s',
-            $this->spec->version, $this->spec->ecc->value, $this->mode->value, strlen($this->prefix), self::SERIAL,
+            $this->spec->version, $this->spec->ecc->value, $this->mode->value, strlen($this->prefix), $this->serialLength,
             dechex(array_sum(self::BASIS))
         );
     }
@@ -156,17 +177,26 @@ final class Solver
         } else {
             // Sonde pleine capacité : flipper le bit b du caractère k flippe
             // exactement le bit header + 8k + b du flux de données, et la
-            // colonne résultante est indépendante du contenu (linéarité).
-            $probe = $this->baseUrl.str_repeat(chr(self::OFFSET), $this->spec->capacity - strlen($this->baseUrl));
-            $m0 = Oracle::render($probe, 0, $this->spec->version, $this->spec->ecc);
-            foreach ($this->freeBits as $i => $s) {
-                $k = ($s - $this->spec->headerBits) >> 3;
-                $b = ($s - $this->spec->headerBits) & 7;
-                $u = $probe;
-                $u[$k] = chr(ord($u[$k]) ^ (0x80 >> $b));
-                $this->cols[$i] = Oracle::render($u, 0, $this->spec->version, $this->spec->ecc) ^ $m0;
+            // colonne résultante est indépendante du contenu (linéarité) —
+            // et indépendante de la longueur du préfixe : sonde partagée.
+            $spec = $this->spec;
+            $allStart = self::firstFreeBit($spec, 1, 0);
+            $allEnd = $spec->headerBits + 8 * $spec->capacity;
+            $all = $cache?->get($this->sharedShortKey());
+            if ($all === null || count($all) !== $allEnd - $allStart) {
+                $probe = str_repeat(chr(self::OFFSET), $spec->capacity);
+                $m0 = Oracle::render($probe, 0, $spec->version, $spec->ecc);
+                $all = [];
+                for ($bit = $allStart; $bit < $allEnd; $bit++) {
+                    $k = ($bit - $spec->headerBits) >> 3;
+                    $b = ($bit - $spec->headerBits) & 7;
+                    $u = $probe;
+                    $u[$k] = chr(ord($u[$k]) ^ (0x80 >> $b));
+                    $all[] = Oracle::render($u, 0, $spec->version, $spec->ecc) ^ $m0;
+                }
+                $cache?->set($this->sharedShortKey(), $all);
             }
-            $cache?->set($this->cacheKey(), $this->cols);
+            $this->cols = array_slice($all, $this->freeBits[0] - $allStart, $nvars);
         }
 
         for ($i = 0; $i < $nvars; $i++) {

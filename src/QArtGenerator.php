@@ -20,6 +20,10 @@ use SqrArt\QArt\Random\SystemRandom;
  * Aucun QR invalide ne peut sortir : le PNG produit est décodé (port ZXing
  * de chillerlan) et l'URL vérifiée ; en cas d'échec, nouvelle série et
  * budget d'erreur réduit, puis exception explicite.
+ *
+ * Payload statique (WiFi, vCard, EPC…) : serialLength 0 + UrlMode::Short —
+ * prefix devient le contenu exact encodé (octets libres), pas de série ni
+ * de résolution serveur ; les tentatives ne varient alors que par budget.
  */
 final class QArtGenerator
 {
@@ -35,6 +39,7 @@ final class QArtGenerator
         private readonly int $version = QArtSpec::DEFAULT_VERSION,
         private readonly UrlMode $urlMode = UrlMode::Full,
         private readonly Ecc $ecc = Ecc::L,
+        private readonly int $serialLength = Solver::SERIAL,
     ) {
         $this->random = $random ?? new SystemRandom;
         if ($errorBudgetPerBlock < 0) {
@@ -145,7 +150,7 @@ final class QArtGenerator
         usort($prio, fn ($a, $b) => [$b[0], $b[1]] <=> [$a[0], $a[1]]);
         $order = array_column($prio, 2);
 
-        $solver = new Solver($spec, $this->prefix, $this->random, $this->urlMode);
+        $solver = new Solver($spec, $this->prefix, $this->random, $this->urlMode, $this->serialLength);
         $solver->buildGenerator($this->matrixCache);
         $solver->eliminate($order);
 
@@ -197,7 +202,7 @@ final class QArtGenerator
                 return new GenerationResult(
                     url: $url,
                     suffix: substr($url, $plen),
-                    serial: substr($url, $plen, Solver::SERIAL),
+                    serial: substr($url, $plen, $this->serialLength),
                     mask: $mask,
                     pngPath: $outPng,
                     attempts: $attempt,
