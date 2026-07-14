@@ -1,5 +1,18 @@
 # sqrart/qart
 
+[![Packagist](https://img.shields.io/packagist/v/sqrart/qart)](https://packagist.org/packages/sqrart/qart)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**The open-source engine behind [sqr.art](https://sqr.art).** Chaque QR
+généré par sqr.art sort de ce moteur — le code que vous lisez est celui
+qui tourne en production, vérifiable de bout en bout (chaque code est
+relu par un vrai décodeur avant livraison).
+
+> Envie du produit fini plutôt que du moteur ? [sqr.art](https://sqr.art)
+> ajoute les liens dynamiques modifiables après impression, les
+> statistiques de scan, les codes WiFi et virement SEPA, les affiches
+> prêtes à imprimer et l'API.
+
 QR codes artistiques : l'image est encodée dans les bits de données **et**
 Reed-Solomon du QR (approche QArt), rendue en halftone couleur. L'URL
 décodée = préfixe fixe + identifiant unique (série + solution) pour lookup
