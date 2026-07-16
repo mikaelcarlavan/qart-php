@@ -81,6 +81,7 @@ final class Renderer
 
         // 2. Points de données par-dessus la texture
         $half = $d * $scale / 2;
+        $dh = (int) round($profile->dotShape->span($d) * $scale / 2);   // demi-diagonale du losange
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {
                 if ($spec->fmap[$r][$c]) {
@@ -100,10 +101,10 @@ final class Renderer
                     DotShape::Square => imagefilledrectangle($im, $px, $py, $px + $side - 1, $py + $side - 1, $fill),
                     DotShape::Round => imagefilledellipse($im, $cx, $cy, $side, $side, $fill),
                     DotShape::Diamond => imagefilledpolygon($im, [
-                        $cx, $py,
-                        $px + $side - 1, $cy,
-                        $cx, $py + $side - 1,
-                        $px, $cy,
+                        $cx, $cy - $dh,
+                        $cx + $dh, $cy,
+                        $cx, $cy + $dh,
+                        $cx - $dh, $cy,
                     ], $fill),
                 };
             }

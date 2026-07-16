@@ -83,6 +83,7 @@ final class SvgRenderer
         // 2. Points de données par-dessus la texture
         $svg[] = '<g>';
         $half = $d / 2;
+        $dHalf = $profile->dotShape->span($d) / 2;   // demi-diagonale du losange
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {
                 if ($spec->fmap[$r][$c]) {
@@ -104,10 +105,10 @@ final class SvgRenderer
                     ),
                     DotShape::Diamond => sprintf(
                         '<path d="M%s %sL%s %sL%s %sL%s %sZ" fill="%s"/>',
-                        self::num($cx), self::num($cy - $half),
-                        self::num($cx + $half), self::num($cy),
-                        self::num($cx), self::num($cy + $half),
-                        self::num($cx - $half), self::num($cy), $fill
+                        self::num($cx), self::num($cy - $dHalf),
+                        self::num($cx + $dHalf), self::num($cy),
+                        self::num($cx), self::num($cy + $dHalf),
+                        self::num($cx - $dHalf), self::num($cy), $fill
                     ),
                 };
             }

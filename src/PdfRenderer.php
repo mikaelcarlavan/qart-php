@@ -87,6 +87,7 @@ final class PdfRenderer
 
         // 2. Points de données par-dessus la texture
         $half = $d / 2;
+        $dHalf = $profile->dotShape->span($d) / 2;   // demi-diagonale du losange
         for ($r = 0; $r < $n; $r++) {
             for ($c = 0; $c < $n; $c++) {
                 if ($spec->fmap[$r][$c]) {
@@ -100,7 +101,7 @@ final class PdfRenderer
                 $ops .= match ($profile->dotShape) {
                     DotShape::Square => self::rect($cx - $half, $cy - $half, $d, $d),
                     DotShape::Round => self::circle($cx, $cy, $half),
-                    DotShape::Diamond => self::diamond($cx, $cy, $half),
+                    DotShape::Diamond => self::diamond($cx, $cy, $dHalf),
                 };
             }
         }

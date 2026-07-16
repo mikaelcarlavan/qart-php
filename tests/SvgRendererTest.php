@@ -110,6 +110,15 @@ final class SvgRendererTest extends TestCase
             RenderProfile::screen()->withDotShape(DotShape::Diamond)
         );
         $this->assertSame(2768, substr_count($diamond, '<path'));
+
+        // aire égale au carré : demi-diagonale D·√2/2, sinon le losange ne
+        // couvre que la moitié du carré et le flou optique des téléphones
+        // l'efface (relevés terrain 2026-07-16)
+        $this->assertSame(1, preg_match(
+            '/<path d="M[\d.]+ ([\d.]+)L[\d.]+ [\d.]+L[\d.]+ ([\d.]+)L[\d.]+ [\d.]+Z"/',
+            $diamond, $m
+        ));
+        $this->assertEqualsWithDelta(3 * M_SQRT2, (float) $m[2] - (float) $m[1], 0.02, 'hauteur du losange');
     }
 
     public function test_rounded_finders_and_brand_color(): void
